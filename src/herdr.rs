@@ -14,22 +14,26 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::fork::{AgentKind, LiveAgent, Placement};
+use crate::fork::{self, AgentKind, LiveAgent, Placement};
 
 /// A new pane shows its shell prompt after a short time. Until then,
-/// `herdr agent start` answers `agent_pane_busy`.
+/// `herdr agent start` answers `agent_pane_busy`. herdr 0.8.2 and later
+/// already try again for 2 seconds: a slow shell can need more time.
 const SHELL_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const SHELL_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// The time that `herdr agent start` waits for the agent (default: 30 s).
+/// The resume of a long session with MCP servers can take more time.
+const AGENT_START_TIMEOUT_MILLISECONDS: &str = "120000";
 
 /// A failure of this plugin, with a message for the user.
 #[derive(Debug)]
 pub enum Error {
     /// herdr refused a command.
     Herdr { code: String, message: String },
-    /// A command did not start, or printed an unexpected output.
+    /// A command did not start, printed an unexpected output, or the pane
+    /// has no agent that this plugin can fork.
     Command(String),
-    /// The pane has no agent that this plugin can fork.
-    NoForkableAgent(String),
 }
 
 impl fmt::Display for Error {
@@ -37,7 +41,6 @@ impl fmt::Display for Error {
         match self {
             Error::Herdr { code, message } => write!(formatter, "herdr: {code}: {message}"),
             Error::Command(message) => formatter.write_str(message),
-            Error::NoForkableAgent(message) => formatter.write_str(message),
         }
     }
 }
@@ -130,7 +133,7 @@ fn string_field(json: &Value, pointer: &str) -> Result<String, Error> {
 /// Return the agent of `pane_id`, if it has a session that can fork.
 pub fn forkable_agent(pane_id: &str) -> Result<ForkableAgent, Error> {
     let no_agent = || {
-        Error::NoForkableAgent(format!(
+        Error::Command(format!(
             "The pane {pane_id} has no Claude Code or Codex agent."
         ))
     };
@@ -150,12 +153,20 @@ pub fn forkable_agent(pane_id: &str) -> Result<ForkableAgent, Error> {
         .agent_session
         .and_then(|session| session.value)
         .ok_or_else(|| {
-            Error::NoForkableAgent(format!(
+            Error::Command(format!(
                 "herdr knows no {kind} session in the pane {pane_id} yet. \
                  Send a first message to the agent. If the problem continues, \
                  install the herdr integration: herdr integration install {kind}"
             ))
         })?;
+    // The session ID becomes an argument of the agent: refuse an ID that
+    // can be an option (a program with access to the herdr socket can
+    // report any session ID).
+    if !fork::is_valid_session_id(&session_id) {
+        return Err(Error::Command(format!(
+            "herdr gave an invalid {kind} session ID for the pane {pane_id}."
+        )));
+    }
     let folder = agent
         .foreground_cwd
         .or(agent.cwd)
@@ -246,6 +257,8 @@ pub fn start_agent(
         kind.herdr_kind(),
         "--pane",
         pane_id,
+        "--timeout",
+        AGENT_START_TIMEOUT_MILLISECONDS,
         "--",
     ];
     arguments.extend(agent_arguments.iter().map(String::as_str));
@@ -262,6 +275,12 @@ pub fn start_agent(
             Err(error) => return Err(error),
         }
     }
+}
+
+/// Close a pane.
+pub fn close_pane(pane_id: &str) -> Result<(), Error> {
+    run(&["pane", "close", pane_id])?;
+    Ok(())
 }
 
 /// Show a message to the user in a herdr notification.

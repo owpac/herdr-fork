@@ -11,6 +11,24 @@ const AGENT_NAME_MAX_LENGTH: usize = 32;
 /// The number of characters of the session ID in the name of a fork.
 const SESSION_ID_PREFIX_LENGTH: usize = 8;
 
+/// The longest title of a conversation in a fork title. herdr refuses a
+/// command line that is too long for the terminal.
+const MAX_TITLE_CHARACTERS: usize = 80;
+
+/// The longest session ID: a UUID has 36 characters.
+const MAX_SESSION_ID_LENGTH: usize = 64;
+
+/// Tell if `session_id` has the form of a session ID of Claude Code or
+/// Codex: hexadecimal digits and `-`, never `-` first. Such an ID cannot
+/// be an option of the agent.
+pub fn is_valid_session_id(session_id: &str) -> bool {
+    let has_valid_length = !session_id.is_empty() && session_id.len() <= MAX_SESSION_ID_LENGTH;
+    let has_valid_characters = session_id
+        .chars()
+        .all(|character| character.is_ascii_hexdigit() || character == '-');
+    has_valid_length && has_valid_characters && !session_id.starts_with('-')
+}
+
 /// Where the fork opens, next to the original conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Placement {
@@ -137,9 +155,11 @@ pub fn fork_names(origin_title: &str, session_id: &str, live_agents: &[LiveAgent
     }
 }
 
-/// Remove the `[F<n>] ` prefix of a fork title, and the spaces.
+/// Remove the `[F<n>] ` prefix of a fork title and the spaces, and cut
+/// the title to `MAX_TITLE_CHARACTERS`.
 fn conversation_title(title: &str) -> String {
-    let title = title.trim();
+    let title: String = title.trim().chars().take(MAX_TITLE_CHARACTERS).collect();
+    let title = title.trim_end();
     let Some(rest) = title.strip_prefix("[F") else {
         return title.to_owned();
     };
@@ -290,5 +310,54 @@ mod tests {
 
         assert_eq!(names.title, "[F1] Réparer l'API (v2)");
         assert_eq!(names.agent_name, "f1-r-parer-l-api-v2");
+    }
+
+    #[test]
+    fn a_uuid_is_a_valid_session_id() {
+        assert!(is_valid_session_id("e3ce1810-6f24-4b2c-98e4-08d8964039be"));
+    }
+
+    #[test]
+    fn an_option_is_not_a_session_id() {
+        assert!(!is_valid_session_id("--dangerously-skip-permissions"));
+        assert!(!is_valid_session_id("-e3ce1810"));
+        assert!(!is_valid_session_id(""));
+        assert!(!is_valid_session_id("e3ce1810 6f24"));
+    }
+
+    #[test]
+    fn a_title_without_space_after_the_prefix_stays_complete() {
+        let names = fork_names("[F1]", "e3ce1810", &[]);
+
+        assert_eq!(names.title, "[F1] [F1]");
+    }
+
+    #[test]
+    fn a_long_title_is_cut() {
+        let long_title = "a".repeat(200);
+
+        let names = fork_names(&long_title, "e3ce1810", &[]);
+
+        assert_eq!(
+            names.title.chars().count(),
+            "[F1] ".len() + MAX_TITLE_CHARACTERS
+        );
+    }
+
+    #[test]
+    fn a_two_digit_number_keeps_the_herdr_limit() {
+        let conversation = "x".repeat(60);
+        let live: Vec<LiveAgent> = (1..10)
+            .map(|number| LiveAgent {
+                name: None,
+                title: Some(format!("[F{number}] {conversation}")),
+            })
+            .collect();
+
+        let names = fork_names(&conversation, "e3ce1810", &live);
+
+        assert!(names.title.starts_with("[F10] "));
+        assert!(names.agent_name.starts_with("f10-"));
+        assert!(names.agent_name.len() <= AGENT_NAME_MAX_LENGTH);
     }
 }

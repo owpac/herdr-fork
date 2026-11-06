@@ -61,12 +61,18 @@ fn fork(arguments: &Arguments) -> Result<String, Error> {
     let names = fork::fork_names(&source.title, &source.session_id, &herdr::live_agents()?);
     let shell_pane_id = herdr::open_shell_pane(&source, arguments.placement, &names.title)?;
     let fork_arguments = source.kind.fork_arguments(&source.session_id, &names.title);
-    herdr::start_agent(
+    let started = herdr::start_agent(
         &names.agent_name,
         source.kind,
         &shell_pane_id,
         &fork_arguments,
-    )?;
+    );
+    if let Err(error) = started {
+        // Do not leave an empty pane with the focus. A failed close must
+        // not hide the first error.
+        let _ = herdr::close_pane(&shell_pane_id);
+        return Err(error);
+    }
     Ok(names.title)
 }
 
