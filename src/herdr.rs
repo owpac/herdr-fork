@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::fork::{AgentKind, Placement};
+use crate::fork::{AgentKind, LiveAgent, Placement};
 
 /// A new pane shows its shell prompt after a short time. Until then,
 /// `herdr agent start` answers `agent_pane_busy`.
@@ -53,6 +53,8 @@ pub struct Agent {
     pub cwd: Option<PathBuf>,
     pub foreground_cwd: Option<PathBuf>,
     pub agent_session: Option<AgentSession>,
+    /// The terminal title, without the status sign of the agent.
+    pub terminal_title_stripped: Option<String>,
 }
 
 /// The session that the herdr integration of the agent reports.
@@ -69,6 +71,9 @@ pub struct ForkableAgent {
     pub kind: AgentKind,
     pub session_id: String,
     pub folder: PathBuf,
+    /// The title of the conversation: Claude Code shows it in the
+    /// terminal title.
+    pub title: String,
 }
 
 /// The herdr executable: herdr gives its path to the plugin commands.
@@ -161,19 +166,22 @@ pub fn forkable_agent(pane_id: &str) -> Result<ForkableAgent, Error> {
         kind,
         session_id,
         folder,
+        title: agent.terminal_title_stripped.unwrap_or_default(),
     })
 }
 
-/// Return the names of the live agents.
-pub fn agent_names() -> Result<Vec<String>, Error> {
+/// Return the names and the titles of the live agents.
+pub fn live_agents() -> Result<Vec<LiveAgent>, Error> {
     let result = run(&["agent", "list"])?;
     let agents = result["agents"].as_array().cloned().unwrap_or_default();
-    let names = agents
+    let live_agents = agents
         .iter()
-        .filter_map(|agent| agent["name"].as_str())
-        .map(str::to_owned)
+        .map(|agent| LiveAgent {
+            name: agent["name"].as_str().map(str::to_owned),
+            title: agent["terminal_title_stripped"].as_str().map(str::to_owned),
+        })
         .collect();
-    Ok(names)
+    Ok(live_agents)
 }
 
 /// Open a shell pane for the fork, and return its ID. The pane gets the focus.

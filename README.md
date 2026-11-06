@@ -12,14 +12,29 @@ The fork gets a new session ID. The original conversation stays in its pane, unc
 | `herdr-fork.down` | Fork into a new split below the pane |
 | `herdr-fork.tab` | Fork into a new tab of the workspace |
 
-The fork starts in the folder of the agent, with the herdr agent name `fork-<start of the session ID>`. If this name is taken, the plugin adds the first free suffix: `-2`, `-3`...
+The fork starts in the folder of the agent. It gets 2 names:
+
+| Name | Example | Where |
+|------|---------|-------|
+| Title: `[F<n>] <title of the conversation>` | `[F1] Parser fix` | The session name of Claude Code (prompt box, `/resume`, terminal title), and the label of a fork in a tab |
+| herdr agent name: `f<n>-<title in lowercase>` | `f1-parser-fix` | `herdr agent prompt`, `wait` and `read`. herdr accepts only `[a-z][a-z0-9_-]`, 32 characters or less |
+
+The forks of one conversation get the numbers 1, 2, 3...: the first number that no live agent uses. A fork of `[F1] Parser fix` is `[F2] Parser fix`: it belongs to the same conversation.
 
 | Agent | Fork command |
 |-------|--------------|
-| Claude Code | `claude --resume <session ID> --fork-session --name <fork name>` |
+| Claude Code | `claude --resume <session ID> --fork-session --name <fork title>` |
 | Codex | `codex fork <session ID>` |
 
 herdr types the command in the shell of the new pane, so your shell aliases of `claude` and `codex` apply. If the plugin cannot fork, a herdr notification gives the reason.
+
+## Life of a fork
+
+A fork is an independent conversation. The plugin keeps no link and no state between the fork and the original conversation.
+
+- To close a fork, close its pane. The conversation stays on the disk: `claude --resume "[F1] Parser fix"` opens it again.
+- After a restart of herdr, the herdr integration resumes the fork with its own session ID.
+- The agent deletes its old conversations itself (for Claude Code: the setting `cleanupPeriodDays`).
 
 ## Requirements
 

@@ -62,19 +62,20 @@ impl AgentKind {
         }
     }
 
-    /// The arguments that start a fork of `session_id`.
+    /// The arguments that start a fork of `session_id`, with the title
+    /// `title` (Claude Code only: Codex has no session name).
     ///
     /// herdr types `<kind> <arguments>` in the shell of the new pane, so
     /// the shell aliases of the agent apply. The fork gets a new session
     /// ID, and the original conversation does not change.
-    pub fn fork_arguments(self, session_id: &str, name: &str) -> Vec<String> {
+    pub fn fork_arguments(self, session_id: &str, title: &str) -> Vec<String> {
         match self {
             AgentKind::Claude => vec![
                 "--resume".to_owned(),
                 session_id.to_owned(),
                 "--fork-session".to_owned(),
                 "--name".to_owned(),
-                name.to_owned(),
+                title.to_owned(),
             ],
             AgentKind::Codex => vec!["fork".to_owned(), session_id.to_owned()],
         }
@@ -87,34 +88,98 @@ impl fmt::Display for AgentKind {
     }
 }
 
-/// The herdr name of a fork: `fork-<start of the session ID>`.
-///
-/// If a live agent already has this name, the name gets the first free
-/// suffix `-2`, `-3`... The name always matches `[a-z][a-z0-9_-]{0,31}`.
-pub fn fork_name(session_id: &str, taken_names: &[String]) -> String {
-    let session_prefix: String = session_id
-        .chars()
-        .take(SESSION_ID_PREFIX_LENGTH)
-        .map(agent_name_character)
-        .collect();
-    let base = format!("fork-{session_prefix}");
-    let mut name = base.clone();
-    let mut suffix = 2;
-    while taken_names.contains(&name) {
-        name = format!("{base}-{suffix}");
-        suffix += 1;
-    }
-    name.truncate(AGENT_NAME_MAX_LENGTH);
-    name
+/// The names of a fork of one conversation.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ForkNames {
+    /// The free title: `[F<n>] <title of the original conversation>`.
+    /// Claude Code shows it as the session name, and herdr as the tab
+    /// label of a fork in a tab.
+    pub title: String,
+    /// The herdr agent name: `f<n>-<title in lowercase>`. herdr accepts
+    /// only `[a-z][a-z0-9_-]{0,31}`.
+    pub agent_name: String,
 }
 
-/// Replace a character that herdr refuses in an agent name with `-`.
-fn agent_name_character(character: char) -> char {
-    let lowercase = character.to_ascii_lowercase();
-    if lowercase.is_ascii_lowercase() || lowercase.is_ascii_digit() || lowercase == '_' {
-        lowercase
+/// A live agent of herdr, as the rules of the names see it.
+#[derive(Debug, Default)]
+pub struct LiveAgent {
+    pub name: Option<String>,
+    pub title: Option<String>,
+}
+
+/// Make the names of a new fork of the conversation `origin_title`.
+///
+/// The forks of one conversation get the numbers 1, 2, 3... A fork of a
+/// fork belongs to the same conversation: `[F1] Fix the parser` gives
+/// `[F2] Fix the parser`. The number is the first one that no live
+/// agent uses. If the conversation has no title, the names use the
+/// start of the session ID.
+pub fn fork_names(origin_title: &str, session_id: &str, live_agents: &[LiveAgent]) -> ForkNames {
+    let mut conversation = conversation_title(origin_title);
+    if conversation.is_empty() {
+        conversation = session_id.chars().take(SESSION_ID_PREFIX_LENGTH).collect();
+    }
+    let slug = agent_name_slug(&conversation);
+    let mut number = 1;
+    loop {
+        let names = ForkNames {
+            title: format!("[F{number}] {conversation}"),
+            agent_name: agent_name(number, &slug),
+        };
+        let is_taken = live_agents.iter().any(|agent| {
+            agent.title.as_deref() == Some(names.title.as_str())
+                || agent.name.as_deref() == Some(names.agent_name.as_str())
+        });
+        if !is_taken {
+            return names;
+        }
+        number += 1;
+    }
+}
+
+/// Remove the `[F<n>] ` prefix of a fork title, and the spaces.
+fn conversation_title(title: &str) -> String {
+    let title = title.trim();
+    let Some(rest) = title.strip_prefix("[F") else {
+        return title.to_owned();
+    };
+    let Some((number, conversation)) = rest.split_once("] ") else {
+        return title.to_owned();
+    };
+    if number.is_empty() || !number.chars().all(|character| character.is_ascii_digit()) {
+        return title.to_owned();
+    }
+    conversation.trim().to_owned()
+}
+
+/// The herdr agent name `f<number>-<slug>`, cut to the length limit.
+fn agent_name(number: u32, slug: &str) -> String {
+    let mut name = format!("f{number}-{slug}");
+    name.truncate(AGENT_NAME_MAX_LENGTH);
+    name.trim_end_matches('-').to_owned()
+}
+
+/// Write text with only the characters of a herdr agent name.
+///
+/// Each other character, a space or an accented letter for example,
+/// becomes one `-`.
+fn agent_name_slug(text: &str) -> String {
+    let mut slug = String::new();
+    for character in text.chars() {
+        let lowercase = character.to_ascii_lowercase();
+        let is_allowed =
+            lowercase.is_ascii_lowercase() || lowercase.is_ascii_digit() || lowercase == '_';
+        if is_allowed {
+            slug.push(lowercase);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-').to_owned();
+    if slug.is_empty() {
+        "fork".to_owned()
     } else {
-        '-'
+        slug
     }
 }
 
@@ -142,8 +207,8 @@ mod tests {
     }
 
     #[test]
-    fn claude_forks_with_resume_and_a_name() {
-        let arguments = AgentKind::Claude.fork_arguments("4f7552dc-0000", "fork-4f7552dc");
+    fn claude_forks_with_resume_and_a_title() {
+        let arguments = AgentKind::Claude.fork_arguments("4f7552dc-0000", "[F1] Fix the parser");
 
         assert_eq!(
             arguments,
@@ -152,38 +217,78 @@ mod tests {
                 "4f7552dc-0000",
                 "--fork-session",
                 "--name",
-                "fork-4f7552dc"
+                "[F1] Fix the parser"
             ]
         );
     }
 
     #[test]
     fn codex_forks_with_its_fork_command() {
-        let arguments = AgentKind::Codex.fork_arguments("019a-session", "fork-019a-ses");
+        let arguments = AgentKind::Codex.fork_arguments("019a-session", "[F1] Fix the parser");
 
         assert_eq!(arguments, ["fork", "019a-session"]);
     }
 
-    #[test]
-    fn fork_name_uses_the_start_of_the_session() {
-        let name = fork_name("49f3f4a3-c670-4974", &[]);
-
-        assert_eq!(name, "fork-49f3f4a3");
+    fn live_agent(name: &str, title: &str) -> LiveAgent {
+        LiveAgent {
+            name: Some(name.to_owned()),
+            title: Some(title.to_owned()),
+        }
     }
 
     #[test]
-    fn fork_name_adds_the_first_free_suffix() {
-        let taken = vec!["fork-49f3f4a3".to_owned(), "fork-49f3f4a3-2".to_owned()];
+    fn the_first_fork_gets_the_number_1() {
+        let names = fork_names("Plugins herdr pour agents Claude", "e3ce1810-6f24", &[]);
 
-        let name = fork_name("49f3f4a3-c670-4974", &taken);
-
-        assert_eq!(name, "fork-49f3f4a3-3");
+        assert_eq!(names.title, "[F1] Plugins herdr pour agents Claude");
+        assert_eq!(names.agent_name, "f1-plugins-herdr-pour-agents-cla");
     }
 
     #[test]
-    fn fork_name_replaces_the_characters_that_herdr_refuses() {
-        let name = fork_name("AB.c/9_x", &[]);
+    fn a_fork_gets_the_first_free_number() {
+        let live = [live_agent("f1-fix-the-parser", "[F1] Fix the parser")];
 
-        assert_eq!(name, "fork-ab-c-9_x");
+        let names = fork_names("Fix the parser", "e3ce1810", &live);
+
+        assert_eq!(names.title, "[F2] Fix the parser");
+        assert_eq!(names.agent_name, "f2-fix-the-parser");
+    }
+
+    #[test]
+    fn a_fork_of_a_fork_belongs_to_the_same_conversation() {
+        let live = [live_agent("f1-fix-the-parser", "[F1] Fix the parser")];
+
+        let names = fork_names("[F1] Fix the parser", "e3ce1810", &live);
+
+        assert_eq!(names.title, "[F2] Fix the parser");
+    }
+
+    #[test]
+    fn a_herdr_name_is_enough_to_take_a_number() {
+        // The title of a new fork shows only when its agent runs.
+        let live = [LiveAgent {
+            name: Some("f1-fix-the-parser".to_owned()),
+            title: None,
+        }];
+
+        let names = fork_names("Fix the parser", "e3ce1810", &live);
+
+        assert_eq!(names.agent_name, "f2-fix-the-parser");
+    }
+
+    #[test]
+    fn a_conversation_without_title_uses_the_session_id() {
+        let names = fork_names("  ", "49f3f4a3-c670-4974", &[]);
+
+        assert_eq!(names.title, "[F1] 49f3f4a3");
+        assert_eq!(names.agent_name, "f1-49f3f4a3");
+    }
+
+    #[test]
+    fn the_herdr_name_replaces_the_other_characters() {
+        let names = fork_names("Réparer l'API (v2)", "e3ce1810", &[]);
+
+        assert_eq!(names.title, "[F1] Réparer l'API (v2)");
+        assert_eq!(names.agent_name, "f1-r-parer-l-api-v2");
     }
 }

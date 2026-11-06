@@ -51,18 +51,23 @@ fn focused_pane_id() -> Result<String, Error> {
         .ok_or_else(|| Error::Command("The herdr action context has no focused pane.".to_owned()))
 }
 
-/// Fork the agent of the pane into a new pane, and return the fork name.
+/// Fork the agent of the pane into a new pane, and return the fork title.
 fn fork(arguments: &Arguments) -> Result<String, Error> {
     let pane_id = match &arguments.pane_id {
         Some(pane_id) => pane_id.clone(),
         None => focused_pane_id()?,
     };
     let source = herdr::forkable_agent(&pane_id)?;
-    let name = fork::fork_name(&source.session_id, &herdr::agent_names()?);
-    let shell_pane_id = herdr::open_shell_pane(&source, arguments.placement, &name)?;
-    let fork_arguments = source.kind.fork_arguments(&source.session_id, &name);
-    herdr::start_agent(&name, source.kind, &shell_pane_id, &fork_arguments)?;
-    Ok(name)
+    let names = fork::fork_names(&source.title, &source.session_id, &herdr::live_agents()?);
+    let shell_pane_id = herdr::open_shell_pane(&source, arguments.placement, &names.title)?;
+    let fork_arguments = source.kind.fork_arguments(&source.session_id, &names.title);
+    herdr::start_agent(
+        &names.agent_name,
+        source.kind,
+        &shell_pane_id,
+        &fork_arguments,
+    )?;
+    Ok(names.title)
 }
 
 fn main() -> ExitCode {
