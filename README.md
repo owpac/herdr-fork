@@ -32,7 +32,7 @@ herdr types the command in the shell of the new pane, so your shell aliases of `
 
 ### Codex and its shared daemon
 
-Codex 0.166 runs its sessions on a shared background server, the daemon. The daemon runs the hooks of Codex with the environment of the pane that started the daemon. Thus the herdr hook gives the session ID to this other pane, and herdr knows no session in the pane of Codex.
+Codex 0.166 runs its sessions on a shared background server, the daemon. The daemon runs the hooks of Codex with the environment of the pane that started the daemon. Thus the herdr hook gives the session ID to this other pane, and herdr knows no session in the pane of Codex. herdr tracks the problem in [herdrdev/herdr#4649](https://github.com/herdrdev/herdr/issues/4649), and Codex in [openai/codex#48500](https://github.com/openai/codex/issues/48500).
 
 Start Codex with `codex --no-daemon` in a herdr pane. For example, add this line to `~/.zshrc`:
 
