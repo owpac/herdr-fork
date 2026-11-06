@@ -21,6 +21,8 @@ The fork starts in the folder of the agent. It gets 2 names:
 
 The forks of one conversation get the numbers 1, 2, 3...: the first number that no live agent uses. A fork of `[F1] Parser fix` is `[F2] Parser fix`: it belongs to the same conversation.
 
+A number becomes free when its fork closes: the next fork can get it again. Thus 2 closed conversations can have the same title in `/resume`.
+
 | Agent | Fork command |
 |-------|--------------|
 | Claude Code | `claude --resume <session ID> --fork-session --name <fork title>` |
@@ -43,11 +45,17 @@ A fork is an independent conversation. The plugin keeps no link and no state bet
 
 ## Installation
 
+Install a release: give its tag, from the [releases](https://github.com/owpac/herdr-fork/releases) page.
+
 ```sh
-herdr plugin install owpac/herdr-fork
+herdr plugin install owpac/herdr-fork --ref 2026.11.1
 ```
 
 The install downloads the release binary for your machine, and checks it with the `SHA256SUMS` file of the release. If the release has no binary for your machine, the install builds the binary with cargo (Rust 1.88 or later).
+
+Without `--ref`, herdr installs the last commit of `main`. Its version is `0.0.0`, so the install always builds with cargo.
+
+To update, install the tag of the new release. `herdr plugin update` fetches the same tag again.
 
 ## Keybindings
 
