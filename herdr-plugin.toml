@@ -1,0 +1,32 @@
+id = "herdr-fork"
+name = "Fork"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Fork the Claude Code or Codex session of the focused pane into a split or a tab"
+platforms = ["linux", "macos"]
+
+# scripts/install.sh puts the binary at bin/herdr-fork: the release binary of this version,
+# or a cargo build.
+[[build]]
+command = ["sh", "scripts/install.sh"]
+
+[[actions]]
+id = "right"
+title = "Fork the agent into a split on the right"
+description = "Fork the Claude Code or Codex session of the focused pane into a new split on the right"
+contexts = ["global"]
+command = ["bin/herdr-fork", "right"]
+
+[[actions]]
+id = "down"
+title = "Fork the agent into a split below"
+description = "Fork the Claude Code or Codex session of the focused pane into a new split below"
+contexts = ["global"]
+command = ["bin/herdr-fork", "down"]
+
+[[actions]]
+id = "tab"
+title = "Fork the agent into a new tab"
+description = "Fork the Claude Code or Codex session of the focused pane into a new tab"
+contexts = ["global"]
+command = ["bin/herdr-fork", "tab"]

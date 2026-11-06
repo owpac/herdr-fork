@@ -1,0 +1,142 @@
+# Build the herdr-fork binary for each supported machine, and attach the binaries to the GitHub
+# release of the tag. The same method as the plugin herdr-bar (github.com/jeffarese/herdr-bar).
+#
+# scripts/install.sh downloads these assets. Do not change their names:
+#   herdr-fork-<os>-<arch>   os: linux or macos, arch: x86_64 or aarch64
+#   SHA256SUMS               "<sha256>  <asset name>" for each binary
+#
+# To publish a version:
+#   1. Set the same version in herdr-plugin.toml and Cargo.toml, then push to main.
+#   2. Push the tag v<version>.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # A pull request builds each asset, but publishes nothing.
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # scripts/install.sh downloads v<manifest version>: a tag that does not match the versions
+  # publishes binaries that nobody can install.
+  versions:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: The tag matches each version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version_of() { sed -n -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$1" | head -n 1; }
+          plugin="v$(version_of herdr-plugin.toml)"
+          cargo="v$(version_of Cargo.toml)"
+          echo "tag $TAG, herdr-plugin.toml $plugin, Cargo.toml $cargo"
+          if [ "$plugin" != "$TAG" ] || [ "$cargo" != "$TAG" ]; then
+            echo "The tag, herdr-plugin.toml and Cargo.toml must have the same version." >&2
+            exit 1
+          fi
+
+  build:
+    needs: versions
+    # Run when the versions match, or when the job versions did not run (pull request).
+    if: ${{ !cancelled() && (needs.versions.result == 'success' || needs.versions.result == 'skipped') }}
+    name: build ${{ matrix.asset }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The musl targets link statically, so the binary runs on each Linux distribution.
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            asset: herdr-fork-linux-x86_64
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            asset: herdr-fork-linux-aarch64
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            asset: herdr-fork-macos-x86_64
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            asset: herdr-fork-macos-aarch64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.99.1
+          targets: ${{ matrix.target }}
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+      - name: Stage the asset
+        env:
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          mkdir -p dist
+          cp "target/$TARGET/release/herdr-fork" "dist/$ASSET"
+      - name: Check the static link
+        if: contains(matrix.target, 'linux-musl')
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: file "dist/$ASSET" | grep -Eq 'statically linked|static-pie linked'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          assets="herdr-fork-linux-x86_64 herdr-fork-linux-aarch64 herdr-fork-macos-x86_64 herdr-fork-macos-aarch64"
+          for asset in $assets; do
+            test -f "$asset" || { echo "missing $asset" >&2; exit 1; }
+          done
+          sha256sum $assets > SHA256SUMS
+          cat SHA256SUMS
+      # Create a draft, upload all the assets, then publish: nobody downloads a partial release.
+      # A published release keeps its assets. A run that failed leaves a draft: the next run fills it.
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "The release $TAG is already published: its assets stay." >&2
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --verify-tag --draft --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber
+          gh release edit "$TAG" --draft=false
