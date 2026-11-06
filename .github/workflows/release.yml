@@ -2,13 +2,16 @@
 # YYYY.M.N, the month of the push in UTC and the number of the release in this month.
 #
 # herdr reads the version in herdr-plugin.toml, and scripts/install.sh downloads the release of
-# this version. On main, the version stays 0.0.0. For each release, the job version writes the
+# this version. On main, the version stays 0.0.0. For each release, the job publish writes the
 # version in herdr-plugin.toml, Cargo.toml and Cargo.lock, in a release commit on top of the
 # main commit. The tag points to this release commit, and main does not change. The dotfiles
 # install a tag: `herdr plugin install owpac/herdr-fork --ref <tag>`.
 #
 # The month has no leading zero (2027.3.1, not 2027.03.1): Cargo and herdr read the version as
 # SemVer, and SemVer refuses a leading zero.
+#
+# The binary does not read its version, so the build jobs build the main commit. The job publish
+# pushes the tag only after all the builds succeed.
 #
 # A tag that GITHUB_TOKEN pushes does not start other workflows. Thus this workflow also builds
 # and publishes the binaries. Do not change the names of the assets: scripts/install.sh
@@ -26,9 +29,10 @@ on:
 permissions:
   contents: read
 
-# One run at a time: two runs must not read the same last tag.
+# One release at a time: two runs must not read the same last tag. The pull requests have their
+# own group, so that they never cancel a release that waits.
 concurrency:
-  group: release
+  group: release-${{ github.event_name == 'push' && 'main' || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -36,43 +40,34 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: write
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      released: ${{ steps.version.outputs.released }}
     steps:
       # fetch-depth 0 also fetches the tags.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - name: Push the release commit and its tag
-        id: tag
+          persist-credentials: false
+      - name: Find the version of this push
+        id: version
         run: |
           main_commit=$(git rev-parse HEAD)
-          # A run again of the same push: reuse the tag of its release commit.
+          # A re-run of the same push: reuse the tag of its release commit.
           for existing in $(git tag --list '[0-9][0-9][0-9][0-9].*.*'); do
             if [ "$(git rev-parse "$existing^{commit}^")" = "$main_commit" ]; then
               echo "The commit $main_commit already has the release $existing."
-              echo "tag=$existing" >> "$GITHUB_OUTPUT"
+              echo "version=$existing" >> "$GITHUB_OUTPUT"
+              echo "released=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
           month=$(date -u +%Y.%-m)
           last=$(git tag --list "$month.*" | sed "s/^$month\.//" | sort -n | tail -1)
           version="$month.$((${last:-0} + 1))"
-          sed -i -E "s/^version = \"[^\"]+\"/version = \"$version\"/" herdr-plugin.toml Cargo.toml
-          awk -v version="$version" '
-            previous == "name = \"herdr-fork\"" && /^version = / { $0 = "version = \"" version "\"" }
-            { print; previous = $0 }
-          ' Cargo.lock > Cargo.lock.new
-          mv Cargo.lock.new Cargo.lock
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --quiet -am "chore: release $version"
-          git tag "$version"
-          git push origin "refs/tags/$version"
-          echo "Tagged $version"
-          echo "tag=$version" >> "$GITHUB_OUTPUT"
+          echo "Next version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "released=false" >> "$GITHUB_OUTPUT"
 
   build:
     needs: version
@@ -101,7 +96,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.version.outputs.tag || github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
@@ -137,6 +131,34 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Push the release commit and its tag
+        if: needs.version.outputs.released != 'true'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          # Change only the first version line of each file: the version of the plugin in
+          # herdr-plugin.toml, and the version of [package] in Cargo.toml.
+          for file in herdr-plugin.toml Cargo.toml; do
+            awk -v version="$VERSION" '
+              !done && /^version = "/ { $0 = "version = \"" version "\""; done = 1 }
+              { print }
+            ' "$file" > "$file.new"
+            mv "$file.new" "$file"
+          done
+          awk -v version="$VERSION" '
+            previous == "name = \"herdr-fork\"" && /^version = / { $0 = "version = \"" version "\"" }
+            { print; previous = $0 }
+          ' Cargo.lock > Cargo.lock.new
+          mv Cargo.lock.new Cargo.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -am "chore: release $VERSION"
+          git tag "$VERSION"
+          git push origin "refs/tags/$VERSION"
+          echo "Tagged $VERSION"
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: dist
@@ -151,12 +173,13 @@ jobs:
           sha256sum $assets > SHA256SUMS
           cat SHA256SUMS
       # Create a draft, upload all the assets, then publish: nobody downloads a partial release.
-      # A published release keeps its assets. A run that failed leaves a draft: the next run fills it.
+      # A published release keeps its assets. If a run fails after the creation of the draft,
+      # a re-run of the same push fills this draft.
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.version.outputs.tag }}
+          TAG: ${{ needs.version.outputs.version }}
         run: |
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             if [ "$draft" != true ]; then
