@@ -55,9 +55,20 @@ sha256_of() {
   fi
 }
 
+# Put the file $1 at bin/herdr-fork. Fail if a step fails.
+install_binary() {
+  mkdir -p bin || return 1
+  mv "$1" "$TARGET" || return 1
+  chmod +x "$TARGET" || return 1
+}
+
 download() {
   asset=$(asset_name) || { say "no release binary for this machine"; return 1; }
   command -v curl >/dev/null 2>&1 || { say "curl is missing"; return 1; }
+  if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    say "sha256sum and shasum are missing: the script cannot check the release binary"
+    return 1
+  fi
   base="$REPOSITORY_URL/releases/download/$version"
   work=$(mktemp -d) || return 1
   if ! curl -fsSL -o "$work/$asset" "$base/$asset" || ! curl -fsSL -o "$work/SHA256SUMS" "$base/SHA256SUMS"; then
@@ -67,11 +78,15 @@ download() {
   fi
   expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$work/SHA256SUMS")
   if [ -z "$expected" ] || [ "$expected" != "$(sha256_of "$work/$asset")" ]; then
-    say "the checksum of $asset does not match SHA256SUMS"
+    say "WARNING: the checksum of $asset does not match SHA256SUMS: the script does not use this binary"
     rm -rf "$work"
     return 1
   fi
-  mkdir -p bin && mv "$work/$asset" "$TARGET" && chmod +x "$TARGET"
+  if ! install_binary "$work/$asset"; then
+    say "cannot install $asset at $TARGET"
+    rm -rf "$work"
+    return 1
+  fi
   rm -rf "$work"
   say "installed the release binary $asset of $version"
 }
@@ -79,7 +94,8 @@ download() {
 build_from_source() {
   command -v cargo >/dev/null 2>&1 || { say "cargo is missing: install Rust 1.88 or later"; return 1; }
   cargo build --release --locked || return 1
-  mkdir -p bin && cp target/release/herdr-fork "$TARGET" && chmod +x "$TARGET"
+  cp target/release/herdr-fork "$ROOT/bin.tmp-herdr-fork" || return 1
+  install_binary "$ROOT/bin.tmp-herdr-fork" || { say "cannot install the binary at $TARGET"; return 1; }
   say "built herdr-fork $version with cargo"
 }
 
