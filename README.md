@@ -100,6 +100,7 @@ From a shell, `herdr plugin action invoke right --plugin herdr-fork` forks the f
 ```sh
 git clone https://github.com/owpac/herdr-fork
 cd herdr-fork
+mise install                                    # Rust and shellcheck of mise.toml
 HERDR_FORK_BUILD=source sh scripts/install.sh   # build bin/herdr-fork with cargo
 herdr plugin link "$PWD"
 ```
@@ -110,6 +111,7 @@ herdr plugin link "$PWD"
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
+shellcheck scripts/*.sh
 ```
 
 ## Release
