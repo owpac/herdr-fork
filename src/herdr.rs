@@ -152,13 +152,7 @@ pub fn forkable_agent(pane_id: &str) -> Result<ForkableAgent, Error> {
     let session_id = agent
         .agent_session
         .and_then(|session| session.value)
-        .ok_or_else(|| {
-            Error::Command(format!(
-                "herdr knows no {kind} session in the pane {pane_id} yet. \
-                 Send a first message to the agent. If the problem continues, \
-                 install the herdr integration: herdr integration install {kind}"
-            ))
-        })?;
+        .ok_or_else(|| Error::Command(kind.missing_session_message(pane_id)))?;
     // The session ID becomes an argument of the agent: refuse an ID that
     // can be an option (a program with access to the herdr socket can
     // report any session ID).
