@@ -26,9 +26,21 @@ A number becomes free when its fork closes: the next fork can get it again. Thus
 | Agent | Fork command |
 |-------|--------------|
 | Claude Code | `claude --resume <session ID> --fork-session --name <fork title>` |
-| Codex | `codex fork <session ID>` |
+| Codex | `codex fork --no-daemon <session ID>` |
 
 herdr types the command in the shell of the new pane, so your shell aliases of `claude` and `codex` apply. If the plugin cannot fork, a herdr notification gives the reason.
+
+### Codex and its shared daemon
+
+Codex 0.166 runs its sessions on a shared background server, the daemon. The daemon runs the hooks of Codex with the environment of the pane that started the daemon. Thus the herdr hook gives the session ID to this other pane, and herdr knows no session in the pane of Codex.
+
+Start Codex with `codex --no-daemon` in a herdr pane. For example, add this line to `~/.zshrc`:
+
+```zsh
+[[ -n "$HERDR_ENV" ]] && alias codex='codex --no-daemon'
+```
+
+The plugin starts each Codex fork with `--no-daemon`, so a fork can fork again. Without the daemon, `codex agents` does not show the sessions of herdr, and a session stops when its pane closes.
 
 ## Life of a fork
 
@@ -41,7 +53,7 @@ A fork is an independent conversation. The plugin keeps no link and no state bet
 ## Requirements
 
 - herdr 0.9.0 or later, on macOS or Linux.
-- The herdr integration of each agent: `herdr integration install claude` and `herdr integration install codex`. The integration gives the session ID of the agent to herdr. A new session has an ID only after its first message.
+- The herdr integration of each agent: `herdr integration install claude` and `herdr integration install codex`. The integration gives the session ID of the agent to herdr. A new session has an ID only after its first message. For Codex, see [Codex and its shared daemon](#codex-and-its-shared-daemon).
 
 ## Installation
 

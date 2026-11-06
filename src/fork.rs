@@ -86,6 +86,11 @@ impl AgentKind {
     /// herdr types `<kind> <arguments>` in the shell of the new pane, so
     /// the shell aliases of the agent apply. The fork gets a new session
     /// ID, and the original conversation does not change.
+    ///
+    /// The Codex fork runs without the shared daemon of Codex. The daemon
+    /// runs the hooks with the environment of the pane that started it, so
+    /// the herdr hook gives the session to this other pane. Without the
+    /// daemon, herdr knows the session of the fork, and the fork can fork.
     pub fn fork_arguments(self, session_id: &str, title: &str) -> Vec<String> {
         match self {
             AgentKind::Claude => vec![
@@ -95,7 +100,30 @@ impl AgentKind {
                 "--name".to_owned(),
                 title.to_owned(),
             ],
-            AgentKind::Codex => vec!["fork".to_owned(), session_id.to_owned()],
+            AgentKind::Codex => vec![
+                "fork".to_owned(),
+                "--no-daemon".to_owned(),
+                session_id.to_owned(),
+            ],
+        }
+    }
+
+    /// The message when herdr knows no session of the agent in `pane_id`.
+    pub fn missing_session_message(self, pane_id: &str) -> String {
+        let start = format!(
+            "herdr knows no {self} session in the pane {pane_id} yet. \
+             Send a first message to the agent."
+        );
+        let integration = format!("herdr integration install {self}");
+        match self {
+            AgentKind::Claude => format!(
+                "{start} If the problem continues, install the herdr integration: {integration}"
+            ),
+            AgentKind::Codex => format!(
+                "{start} If the problem continues, start Codex with codex --no-daemon: \
+                 the shared daemon of Codex gives the session to another pane. \
+                 Also install the herdr integration: {integration}"
+            ),
         }
     }
 }
@@ -243,10 +271,27 @@ mod tests {
     }
 
     #[test]
-    fn codex_forks_with_its_fork_command() {
+    fn codex_forks_with_its_fork_command_without_the_daemon() {
         let arguments = AgentKind::Codex.fork_arguments("019a-session", "[F1] Fix the parser");
 
-        assert_eq!(arguments, ["fork", "019a-session"]);
+        assert_eq!(arguments, ["fork", "--no-daemon", "019a-session"]);
+    }
+
+    #[test]
+    fn the_codex_message_tells_to_start_codex_without_the_daemon() {
+        let message = AgentKind::Codex.missing_session_message("w4:pT");
+
+        assert!(message.contains("in the pane w4:pT"));
+        assert!(message.contains("codex --no-daemon"));
+        assert!(message.contains("herdr integration install codex"));
+    }
+
+    #[test]
+    fn the_claude_message_tells_only_to_install_the_integration() {
+        let message = AgentKind::Claude.missing_session_message("w4:p1");
+
+        assert!(message.contains("herdr integration install claude"));
+        assert!(!message.contains("--no-daemon"));
     }
 
     fn live_agent(name: &str, title: &str) -> LiveAgent {
