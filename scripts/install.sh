@@ -5,8 +5,10 @@
 # install). `herdr plugin link` does not run it: run it yourself for a local checkout.
 #
 # The script downloads the binary of the manifest version from the GitHub release, and checks it
-# with the SHA256SUMS file of the release. If the release has no binary for this machine, or if
-# the download or the check fails, the script builds the binary with cargo (Rust 1.88 or later).
+# with the SHA256SUMS file of the release. The tag of a release is its version (YYYY.M.N). On main,
+# the version is 0.0.0: no release has this version, so the script builds with cargo.
+# If the release has no binary for this machine, or if the download or the check fails, the script
+# also builds the binary with cargo (Rust 1.88 or later).
 # The same method as the plugin herdr-bar (github.com/jeffarese/herdr-bar).
 #
 #   HERDR_FORK_BUILD=source   skip the download, and build with cargo
@@ -56,10 +58,10 @@ sha256_of() {
 download() {
   asset=$(asset_name) || { say "no release binary for this machine"; return 1; }
   command -v curl >/dev/null 2>&1 || { say "curl is missing"; return 1; }
-  base="$REPOSITORY_URL/releases/download/v$version"
+  base="$REPOSITORY_URL/releases/download/$version"
   work=$(mktemp -d) || return 1
   if ! curl -fsSL -o "$work/$asset" "$base/$asset" || ! curl -fsSL -o "$work/SHA256SUMS" "$base/SHA256SUMS"; then
-    say "cannot download $asset of v$version"
+    say "cannot download $asset of $version"
     rm -rf "$work"
     return 1
   fi
@@ -71,17 +73,17 @@ download() {
   fi
   mkdir -p bin && mv "$work/$asset" "$TARGET" && chmod +x "$TARGET"
   rm -rf "$work"
-  say "installed the release binary $asset of v$version"
+  say "installed the release binary $asset of $version"
 }
 
 build_from_source() {
   command -v cargo >/dev/null 2>&1 || { say "cargo is missing: install Rust 1.88 or later"; return 1; }
   cargo build --release --locked || return 1
   mkdir -p bin && cp target/release/herdr-fork "$TARGET" && chmod +x "$TARGET"
-  say "built herdr-fork v$version with cargo"
+  say "built herdr-fork $version with cargo"
 }
 
-if [ "${HERDR_FORK_BUILD:-}" != source ] && download; then
+if [ "${HERDR_FORK_BUILD:-}" != source ] && [ "$version" != 0.0.0 ] && download; then
   exit 0
 fi
 build_from_source

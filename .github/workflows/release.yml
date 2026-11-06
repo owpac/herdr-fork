@@ -1,56 +1,83 @@
-# Build the herdr-fork binary for each supported machine, and attach the binaries to the GitHub
-# release of the tag. The same method as the plugin herdr-bar (github.com/jeffarese/herdr-bar).
+# Release each push on main, like the tools pac, kompose and craft of owpac: the version is
+# YYYY.M.N, the month of the push in UTC and the number of the release in this month.
 #
-# scripts/install.sh downloads these assets. Do not change their names:
+# herdr reads the version in herdr-plugin.toml, and scripts/install.sh downloads the release of
+# this version. On main, the version stays 0.0.0. For each release, the job version writes the
+# version in herdr-plugin.toml, Cargo.toml and Cargo.lock, in a release commit on top of the
+# main commit. The tag points to this release commit, and main does not change. The dotfiles
+# install a tag: `herdr plugin install owpac/herdr-fork --ref <tag>`.
+#
+# The month has no leading zero (2027.3.1, not 2027.03.1): Cargo and herdr read the version as
+# SemVer, and SemVer refuses a leading zero.
+#
+# A tag that GITHUB_TOKEN pushes does not start other workflows. Thus this workflow also builds
+# and publishes the binaries. Do not change the names of the assets: scripts/install.sh
+# downloads them.
 #   herdr-fork-<os>-<arch>   os: linux or macos, arch: x86_64 or aarch64
 #   SHA256SUMS               "<sha256>  <asset name>" for each binary
-#
-# To publish a version:
-#   1. Set the same version in herdr-plugin.toml and Cargo.toml, then push to main.
-#   2. Push the tag v<version>.
 name: release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   # A pull request builds each asset, but publishes nothing.
   pull_request:
 
 permissions:
   contents: read
 
+# One run at a time: two runs must not read the same last tag.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  # scripts/install.sh downloads v<manifest version>: a tag that does not match the versions
-  # publishes binaries that nobody can install.
-  versions:
-    if: startsWith(github.ref, 'refs/tags/')
+  version:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
+      # fetch-depth 0 also fetches the tags.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          persist-credentials: false
-      - name: The tag matches each version
-        env:
-          TAG: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: Push the release commit and its tag
+        id: tag
         run: |
-          version_of() { sed -n -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$1" | head -n 1; }
-          plugin="v$(version_of herdr-plugin.toml)"
-          cargo="v$(version_of Cargo.toml)"
-          echo "tag $TAG, herdr-plugin.toml $plugin, Cargo.toml $cargo"
-          if [ "$plugin" != "$TAG" ] || [ "$cargo" != "$TAG" ]; then
-            echo "The tag, herdr-plugin.toml and Cargo.toml must have the same version." >&2
-            exit 1
-          fi
+          main_commit=$(git rev-parse HEAD)
+          # A run again of the same push: reuse the tag of its release commit.
+          for existing in $(git tag --list '[0-9][0-9][0-9][0-9].*.*'); do
+            if [ "$(git rev-parse "$existing^{commit}^")" = "$main_commit" ]; then
+              echo "The commit $main_commit already has the release $existing."
+              echo "tag=$existing" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          month=$(date -u +%Y.%-m)
+          last=$(git tag --list "$month.*" | sed "s/^$month\.//" | sort -n | tail -1)
+          version="$month.$((${last:-0} + 1))"
+          sed -i -E "s/^version = \"[^\"]+\"/version = \"$version\"/" herdr-plugin.toml Cargo.toml
+          awk -v version="$version" '
+            previous == "name = \"herdr-fork\"" && /^version = / { $0 = "version = \"" version "\"" }
+            { print; previous = $0 }
+          ' Cargo.lock > Cargo.lock.new
+          mv Cargo.lock.new Cargo.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -am "chore: release $version"
+          git tag "$version"
+          git push origin "refs/tags/$version"
+          echo "Tagged $version"
+          echo "tag=$version" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: versions
-    # Run when the versions match, or when the job versions did not run (pull request).
-    if: ${{ !cancelled() && (needs.versions.result == 'success' || needs.versions.result == 'skipped') }}
+    needs: version
+    # Run when the job version passed, or when it did not run (pull request).
+    if: ${{ !cancelled() && (needs.version.result == 'success' || needs.version.result == 'skipped') }}
     name: build ${{ matrix.asset }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -74,6 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ needs.version.outputs.tag || github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
@@ -102,8 +130,8 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [version, build]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -128,12 +156,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             if [ "$draft" != true ]; then
               echo "The release $TAG is already published: its assets stay." >&2
-              exit 1
+              exit 0
             fi
           else
             gh release create "$TAG" --verify-tag --draft --title "$TAG" --generate-notes

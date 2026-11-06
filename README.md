@@ -94,10 +94,15 @@ cargo test --locked
 
 ## Release
 
-1. Set the same version in `herdr-plugin.toml` and `Cargo.toml`, then push to `main`.
-2. Push the tag `v<version>`.
+Each push on `main` makes a release, like the tools [pac](https://github.com/owpac/pac), kompose and craft of owpac. The version is `YYYY.M.N`: the month of the push in UTC, and the number of the release in this month (for example `2026.11.1`). The month has no leading zero, because Cargo and herdr read the version as SemVer.
 
-The workflow `release` builds the binaries for Linux and macOS (`x86_64` and `aarch64`), and publishes them with `SHA256SUMS` in the GitHub release of the tag. `scripts/install.sh` downloads the binary of the manifest version.
+On `main`, `herdr-plugin.toml` and `Cargo.toml` keep the version `0.0.0`. For each push, the workflow `release`:
+
+1. Writes the version in `herdr-plugin.toml`, `Cargo.toml` and `Cargo.lock`, in a release commit on top of the commit of `main`.
+2. Pushes the tag of the version, on this release commit. `main` does not change.
+3. Builds the binaries for Linux and macOS (`x86_64` and `aarch64`), and publishes them with `SHA256SUMS` in the GitHub release of the tag.
+
+Install a tag, not a commit of `main`: `herdr plugin install owpac/herdr-fork --ref 2026.11.1`. On `main`, the version `0.0.0` has no release, so `scripts/install.sh` builds with cargo.
 
 The build and release method comes from [herdr-bar](https://github.com/jeffarese/herdr-bar) (MIT).
 
