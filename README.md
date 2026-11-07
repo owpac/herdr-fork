@@ -28,7 +28,7 @@ A number becomes free when its fork closes: the next fork can get it again. Thus
 | Claude Code | `claude --resume <session ID> --fork-session --name <fork title>` |
 | Codex | `codex fork --no-daemon <session ID>` |
 
-herdr types the command in the shell of the new pane, so your shell aliases of `claude` and `codex` apply. If the plugin cannot fork, a herdr notification gives the reason.
+herdr types the command in the shell of the new pane, so your shell aliases of `claude` and `codex` apply. If the plugin cannot fork, a small popup gives the reason: press a key to close it. If the popup cannot open, a herdr notification gives the reason.
 
 A session without a message has no conversation to fork: send a first message to the agent, then fork. Claude Code gives the session ID to herdr at the start, but it writes the conversation only after the first message. Before the fork, the plugin looks for the file `<session ID>.jsonl` in `~/.claude/projects/` and in `$CLAUDE_CONFIG_DIR/projects/`. The plugin runs with the environment of herdr: if you set `CLAUDE_CONFIG_DIR` only for Claude Code, also set it for herdr. Codex gives the session ID to herdr only after the first message.
 
