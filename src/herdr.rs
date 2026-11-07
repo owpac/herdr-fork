@@ -22,6 +22,19 @@ use crate::fork::{self, AgentKind, LiveAgent, Placement};
 const SHELL_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const SHELL_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// The plugin ID of `herdr-plugin.toml`.
+const PLUGIN_ID: &str = "herdr-fork";
+
+/// The popup of `herdr-plugin.toml` that shows a message.
+const MESSAGE_ENTRYPOINT: &str = "message";
+
+/// The environment variable that gives its message to the popup.
+pub const MESSAGE_VARIABLE: &str = "HERDR_FORK_MESSAGE";
+
+/// The time that the popup waits for another popup to close.
+const POPUP_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const POPUP_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 /// The time that `herdr agent start` waits for the agent (default: 30 s).
 /// The resume of a long session with MCP servers can take more time.
 const AGENT_START_TIMEOUT_MILLISECONDS: &str = "120000";
@@ -277,8 +290,38 @@ pub fn close_pane(pane_id: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Show a message to the user in a herdr notification.
-pub fn notify(message: &str) {
+/// Show a message to the user in the popup `message` of the plugin. If
+/// the popup cannot open, show the message in a herdr notification.
+///
+/// The popup comes first: with `ui.toast.delivery = "terminal"`, herdr
+/// gives its notifications to the terminal, and the terminal can hide
+/// them.
+pub fn show_message(message: &str) {
+    let variable = format!("{MESSAGE_VARIABLE}={message}");
+    let arguments = [
+        "plugin",
+        "pane",
+        "open",
+        "--plugin",
+        PLUGIN_ID,
+        "--entrypoint",
+        MESSAGE_ENTRYPOINT,
+        "--env",
+        &variable,
+        "--focus",
+    ];
+    // herdr shows one popup at a time: while another popup is open, it
+    // answers `ui_busy`.
+    let deadline = Instant::now() + POPUP_READY_TIMEOUT;
+    loop {
+        match run(&arguments) {
+            Ok(_) => return,
+            Err(Error::Herdr { code, .. }) if code == "ui_busy" && Instant::now() < deadline => {
+                thread::sleep(POPUP_READY_POLL_INTERVAL);
+            }
+            Err(_) => break,
+        }
+    }
     // A failed notification must not hide the first error: ignore it.
     let _ = run(&["notification", "show", "fork", "--body", message]);
 }

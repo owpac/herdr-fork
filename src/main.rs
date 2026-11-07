@@ -5,10 +5,14 @@
 //! herdr runs this command for the actions of the plugin. The focused
 //! pane comes from `HERDR_PLUGIN_CONTEXT_JSON`. Give `--pane` to fork
 //! another pane, for example from a shell.
+//!
+//! `herdr-fork message` is the command of the popup `message`: it shows
+//! the message of `HERDR_FORK_MESSAGE`.
 
 mod conversation;
 mod fork;
 mod herdr;
+mod ui;
 
 use std::env;
 use std::process::ExitCode;
@@ -17,6 +21,9 @@ use fork::Placement;
 use herdr::Error;
 
 const USAGE: &str = "usage: herdr-fork right|down|tab [--pane <pane_id>]";
+
+/// The title of the popup `message`.
+const MESSAGE_TITLE: &str = "Fork";
 
 /// The command line of the plugin.
 struct Arguments {
@@ -85,6 +92,11 @@ fn fork(arguments: &Arguments) -> Result<String, Error> {
 
 fn main() -> ExitCode {
     let command_line: Vec<String> = env::args().skip(1).collect();
+    if command_line == ["message"] {
+        let message = env::var(herdr::MESSAGE_VARIABLE).unwrap_or_default();
+        ui::show_message(MESSAGE_TITLE, &message);
+        return ExitCode::SUCCESS;
+    }
     let arguments = match parse_arguments(&command_line) {
         Ok(arguments) => arguments,
         Err(message) => {
@@ -99,7 +111,7 @@ fn main() -> ExitCode {
         }
         Err(error) => {
             eprintln!("herdr-fork: {error}");
-            herdr::notify(&error.to_string());
+            herdr::show_message(&error.to_string());
             ExitCode::FAILURE
         }
     }

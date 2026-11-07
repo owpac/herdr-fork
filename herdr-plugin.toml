@@ -32,3 +32,14 @@ title = "Fork the agent into a new tab"
 description = "Fork the Claude Code or Codex session of the focused pane into a new tab"
 contexts = ["global"]
 command = ["bin/herdr-fork", "tab"]
+
+# A small popup with the message of a failed fork and an OK button. A herdr notification can stay
+# hidden: with ui.toast.delivery = "terminal", herdr gives it to the terminal. As for an action,
+# herdr finds bin/herdr-fork in the plugin root.
+[[panes]]
+id = "message"
+title = "Fork"
+placement = "popup"
+width = 72
+height = 14
+command = ["bin/herdr-fork", "message"]
