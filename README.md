@@ -30,6 +30,8 @@ A number becomes free when its fork closes: the next fork can get it again. Thus
 
 herdr types the command in the shell of the new pane, so your shell aliases of `claude` and `codex` apply. If the plugin cannot fork, a herdr notification gives the reason.
 
+A session without a message has no conversation to fork: send a first message to the agent, then fork. Claude Code gives the session ID to herdr at the start, but it writes the conversation only after the first message. Before the fork, the plugin looks for the file `<session ID>.jsonl` in `~/.claude/projects/` and in `$CLAUDE_CONFIG_DIR/projects/`. The plugin runs with the environment of herdr: if you set `CLAUDE_CONFIG_DIR` only for Claude Code, also set it for herdr. Codex gives the session ID to herdr only after the first message.
+
 ### Codex and its shared daemon
 
 Codex 0.166 runs its sessions on a shared background server, the daemon. The daemon runs the hooks of Codex with the environment of the pane that started the daemon. Thus the herdr hook gives the session ID to this other pane, and herdr knows no session in the pane of Codex. herdr tracks the problem in [herdrdev/herdr#4649](https://github.com/herdrdev/herdr/issues/4649), and Codex in [openai/codex#48500](https://github.com/openai/codex/issues/48500).
@@ -53,7 +55,7 @@ A fork is an independent conversation. The plugin keeps no link and no state bet
 ## Requirements
 
 - herdr 0.9.0 or later, on macOS or Linux.
-- The herdr integration of each agent: `herdr integration install claude` and `herdr integration install codex`. The integration gives the session ID of the agent to herdr. A new session has an ID only after its first message. For Codex, see [Codex and its shared daemon](#codex-and-its-shared-daemon).
+- The herdr integration of each agent: `herdr integration install claude` and `herdr integration install codex`. The integration gives the session ID of the agent to herdr. For Codex, see [Codex and its shared daemon](#codex-and-its-shared-daemon).
 
 ## Installation
 
