@@ -147,8 +147,8 @@ pub fn forkable_agent(pane_id: &str) -> Result<ForkableAgent, Error> {
     let Some(kind) = AgentKind::from_herdr(&kind_name) else {
         return Err(no_agent());
     };
-    // The herdr integration of the agent reports the session. A new
-    // session without a message has nothing to fork yet.
+    // The herdr integration of the agent reports the session. Codex
+    // reports it only after the first message.
     let session_id = agent
         .agent_session
         .and_then(|session| session.value)

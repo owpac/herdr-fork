@@ -126,6 +126,16 @@ impl AgentKind {
             ),
         }
     }
+
+    /// The message when the session in `pane_id` has no conversation on
+    /// the disk yet.
+    pub fn empty_session_message(self, pane_id: &str) -> String {
+        format!(
+            "The {self} session in the pane {pane_id} has no conversation on the disk yet: \
+             the agent writes it after the first message. \
+             Send a message to the agent, then fork again."
+        )
+    }
 }
 
 impl fmt::Display for AgentKind {
@@ -292,6 +302,14 @@ mod tests {
 
         assert!(message.contains("herdr integration install claude"));
         assert!(!message.contains("--no-daemon"));
+    }
+
+    #[test]
+    fn the_empty_session_message_tells_to_send_a_message() {
+        let message = AgentKind::Claude.empty_session_message("w1F:p1");
+
+        assert!(message.contains("claude session in the pane w1F:p1"));
+        assert!(message.contains("Send a message to the agent"));
     }
 
     fn live_agent(name: &str, title: &str) -> LiveAgent {

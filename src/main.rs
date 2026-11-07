@@ -6,6 +6,7 @@
 //! pane comes from `HERDR_PLUGIN_CONTEXT_JSON`. Give `--pane` to fork
 //! another pane, for example from a shell.
 
+mod conversation;
 mod fork;
 mod herdr;
 
@@ -58,6 +59,12 @@ fn fork(arguments: &Arguments) -> Result<String, Error> {
         None => focused_pane_id()?,
     };
     let source = herdr::forkable_agent(&pane_id)?;
+    // Do not open a pane for a fork that cannot start.
+    if conversation::is_missing(source.kind, &source.session_id) {
+        return Err(Error::Command(
+            source.kind.empty_session_message(&source.pane_id),
+        ));
+    }
     let names = fork::fork_names(&source.title, &source.session_id, &herdr::live_agents()?);
     let shell_pane_id = herdr::open_shell_pane(&source, arguments.placement, &names.title)?;
     let fork_arguments = source.kind.fork_arguments(&source.session_id, &names.title);
