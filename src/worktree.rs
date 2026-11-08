@@ -9,9 +9,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::config;
 use crate::conversation;
 use crate::fork::{self, AgentKind, ForkNames};
 use crate::herdr::{self, Error, WorkspacePane};
+use crate::model::{self, ModelSource};
 
 pub const USAGE: &str = "usage: herdr-fork worktree --path <worktree> \
     (--agent <name|pane> | --brief [--kind claude|codex]) \
@@ -63,7 +65,7 @@ pub fn parse_arguments(arguments: &[String]) -> Result<WorktreeArguments, String
             "--model" => {
                 // The model becomes an argument of the agent: refuse a value
                 // that can be an option.
-                if value.is_empty() || value.starts_with('-') {
+                if !model::is_valid_model(&value) {
                     return Err(format!("invalid model {value:?}"));
                 }
                 parsed.model = Some(value);
@@ -78,9 +80,10 @@ pub fn parse_arguments(arguments: &[String]) -> Result<WorktreeArguments, String
         }
     }
     parsed.path = path.ok_or_else(|| USAGE.to_owned())?;
-    match (&parsed.agent, parsed.is_brief) {
-        (Some(_), true) | (None, false) => return Err(USAGE.to_owned()),
-        _ => {}
+    // A fork needs the agent to fork. A brief can name the orchestrator:
+    // the new agent then inherits its kind and its model.
+    if parsed.agent.is_none() && !parsed.is_brief {
+        return Err(USAGE.to_owned());
     }
     if parsed.is_brief && parsed.name.is_none() {
         return Err("--brief needs --name: a new agent has no conversation title".to_owned());
@@ -194,11 +197,20 @@ pub struct Started {
     pub title: String,
     pub pane_id: String,
     pub workspace_id: String,
+    /// `fork` or `brief`.
+    pub mode: &'static str,
+    /// The model of the agent, or None for its default model.
+    pub model: Option<String>,
+    pub model_source: ModelSource,
 }
 
 /// Fork the agent, or start a new agent, in the workspace of the
 /// worktree, then send the task.
 pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
+    let config = config::load();
+    if let Some(message) = config.agentic_mode.refusal(arguments.is_brief) {
+        return Err(Error::Command(message));
+    }
     let worktree = fs::canonicalize(&arguments.path)
         .map_err(|error| Error::Command(format!("{}: {error}", arguments.path.display())))?;
     let main = main_checkout(&worktree)?;
@@ -208,9 +220,14 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
             worktree.display()
         )));
     }
-    let (kind, names, agent_arguments) = match &arguments.agent {
-        Some(agent) => {
-            let source = herdr::forkable_agent(agent)?;
+    // The agent of --agent: the agent to fork, or the orchestrator of a
+    // brief (its kind and its model).
+    let source = match &arguments.agent {
+        Some(agent) => Some(herdr::forkable_agent(agent)?),
+        None => None,
+    };
+    let (kind, names, agent_arguments) = match (&source, arguments.is_brief) {
+        (Some(source), false) => {
             if conversation::is_missing(source.kind, &source.session_id) {
                 return Err(Error::Command(
                     source.kind.empty_session_message(&source.pane_id),
@@ -226,8 +243,11 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
             let fork_arguments = source.kind.fork_arguments(&source.session_id, &names.title);
             (source.kind, names, fork_arguments)
         }
-        None => {
-            let kind = arguments.kind.unwrap_or(AgentKind::Claude);
+        _ => {
+            let kind = arguments
+                .kind
+                .or(source.as_ref().map(|source| source.kind))
+                .unwrap_or(AgentKind::Claude);
             let name = arguments.name.clone().unwrap_or_default();
             let names = ForkNames {
                 title: name.clone(),
@@ -237,8 +257,17 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
             (kind, names, new_arguments)
         }
     };
-    let agent_arguments =
-        with_model_and_report_tools(kind, arguments.model.as_deref(), agent_arguments);
+    // Only an agent of the same kind gives its model: a Claude model means
+    // nothing to Codex.
+    let inherited = || {
+        source
+            .as_ref()
+            .filter(|source| source.kind == kind)
+            .and_then(|source| conversation::last_model(source.kind, &source.session_id))
+    };
+    let (model, model_source) =
+        model::resolve_model(arguments.model.as_deref(), &config.agentic_model, inherited);
+    let agent_arguments = with_model_and_report_tools(kind, model.as_deref(), agent_arguments);
     let workspace = herdr::open_worktree(&main, &worktree)?;
     let panes = if workspace.is_already_open {
         herdr::workspace_panes(&workspace.workspace_id)?
@@ -277,6 +306,9 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
         title: names.title,
         pane_id,
         workspace_id: workspace.workspace_id,
+        mode: if arguments.is_brief { "brief" } else { "fork" },
+        model,
+        model_source,
     })
 }
 
@@ -331,10 +363,11 @@ mod tests {
     fn parse_needs_a_path_and_one_source() {
         assert!(parse_arguments(&strings(&["--agent", "orch"])).is_err());
         assert!(parse_arguments(&strings(&["--path", "/w"])).is_err());
+        // A brief can name its orchestrator, for the kind and the model.
         assert!(parse_arguments(&strings(&[
             "--path", "/w", "--agent", "a", "--brief", "--name", "b"
         ]))
-        .is_err());
+        .is_ok());
     }
 
     #[test]

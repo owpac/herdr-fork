@@ -13,9 +13,11 @@
 //! an agent into the herdr workspace of a git worktree (see `worktree`).
 //! It prints a JSON object, and shows no popup: an agent calls it.
 
+mod config;
 mod conversation;
 mod fork;
 mod herdr;
+mod model;
 mod ui;
 mod worktree;
 
@@ -79,7 +81,15 @@ fn fork(arguments: &Arguments) -> Result<String, Error> {
     }
     let names = fork::fork_names(&source.title, &source.session_id, &herdr::live_agents()?);
     let shell_pane_id = herdr::open_shell_pane(&source, arguments.placement, &names.title)?;
-    let fork_arguments = source.kind.fork_arguments(&source.session_id, &names.title);
+    let mut fork_arguments = source.kind.fork_arguments(&source.session_id, &names.title);
+    // The setting manual_model. No orchestrator chooses: auto acts as
+    // inherited.
+    let (model, _) = model::resolve_model(None, &config::load().manual_model, || {
+        conversation::last_model(source.kind, &source.session_id)
+    });
+    if let Some(model) = model {
+        fork_arguments.extend(["--model".to_owned(), model]);
+    }
     let started = herdr::start_agent(
         &names.agent_name,
         source.kind,
@@ -112,6 +122,9 @@ fn fork_into_worktree(command_line: &[String]) -> ExitCode {
                 "title": started.title,
                 "pane_id": started.pane_id,
                 "workspace_id": started.workspace_id,
+                "mode": started.mode,
+                "model": started.model,
+                "model_source": started.model_source.to_string(),
             });
             println!("{json}");
             ExitCode::SUCCESS

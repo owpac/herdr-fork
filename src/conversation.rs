@@ -9,7 +9,9 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
 
 use crate::fork::AgentKind;
 
@@ -69,9 +71,124 @@ fn is_missing_in_claude_projects(projects_folders: &[PathBuf], session_id: &str)
     has_readable_folder
 }
 
+/// Return the model of the last turn of the session, or None if the
+/// plugin cannot read it. A fork with the setting `inherited` uses it.
+pub fn last_model(kind: AgentKind, session_id: &str) -> Option<String> {
+    match kind {
+        AgentKind::Claude => {
+            let path = find_claude_conversation(&claude_projects_folders(), session_id)?;
+            last_claude_model(&fs::read_to_string(path).ok()?)
+        }
+        AgentKind::Codex => {
+            let path = find_codex_rollout(&codex_sessions_folder()?, session_id, 0)?;
+            last_codex_model(&fs::read_to_string(path).ok()?)
+        }
+    }
+}
+
+/// Find the conversation file `<session_id>.jsonl` of Claude Code.
+fn find_claude_conversation(projects_folders: &[PathBuf], session_id: &str) -> Option<PathBuf> {
+    let file_name = format!("{session_id}.jsonl");
+    projects_folders.iter().find_map(|projects_folder| {
+        fs::read_dir(projects_folder)
+            .ok()?
+            .flatten()
+            .map(|project_folder| project_folder.path().join(&file_name))
+            .find(|path| path.is_file())
+    })
+}
+
+/// The folder of the Codex sessions: `sessions` in `CODEX_HOME`, else in
+/// `~/.codex`.
+fn codex_sessions_folder() -> Option<PathBuf> {
+    match env::var_os("CODEX_HOME") {
+        Some(home) if !home.is_empty() => Some(PathBuf::from(home).join("sessions")),
+        _ => Some(
+            PathBuf::from(env::var_os("HOME")?)
+                .join(".codex")
+                .join("sessions"),
+        ),
+    }
+}
+
+/// The deepest folder level of the Codex sessions: `YYYY/MM/DD`.
+const CODEX_SESSION_DEPTH: usize = 3;
+
+/// Find the file `rollout-<time>-<session_id>.jsonl` under `folder`.
+fn find_codex_rollout(folder: &Path, session_id: &str, depth: usize) -> Option<PathBuf> {
+    let suffix = format!("-{session_id}.jsonl");
+    for entry in fs::read_dir(folder).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() && depth < CODEX_SESSION_DEPTH {
+            if let Some(found) = find_codex_rollout(&path, session_id, depth + 1) {
+                return Some(found);
+            }
+        } else if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().ends_with(&suffix))
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// The model of the last answer in a conversation file of Claude Code.
+/// The function reads the lines from the end, and stops at the first
+/// model.
+fn last_claude_model(text: &str) -> Option<String> {
+    text.lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|entry| entry["type"] == "assistant")
+        .filter_map(|entry| entry["message"]["model"].as_str().map(str::to_owned))
+        .find(|model| model != "<synthetic>")
+}
+
+/// The model of the last turn in a session file of Codex.
+fn last_codex_model(text: &str) -> Option<String> {
+    text.lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|entry| entry["type"] == "turn_context")
+        .find_map(|entry| entry["payload"]["model"].as_str().map(str::to_owned))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_claude_model_skips_the_synthetic_answers() {
+        let text = concat!(
+            r#"{"type":"user","message":{"content":"hi"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"model":"claude-opus-5-5"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"model":"claude-haiku-5-5"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"model":"<synthetic>"}}"#,
+            "\n",
+            "not json\n",
+        );
+
+        assert_eq!(last_claude_model(text).as_deref(), Some("claude-haiku-5-5"));
+    }
+
+    #[test]
+    fn the_last_codex_model_comes_from_the_turn_context() {
+        let text = concat!(
+            r#"{"type":"session_meta","payload":{"id":"x"}}"#,
+            "\n",
+            r#"{"type":"turn_context","payload":{"model":"gpt-a"}}"#,
+            "\n",
+            r#"{"type":"turn_context","payload":{"model":"gpt-b"}}"#,
+            "\n",
+        );
+
+        assert_eq!(last_codex_model(text).as_deref(), Some("gpt-b"));
+        assert_eq!(last_codex_model("{}\n"), None);
+    }
 
     /// A new empty folder for one test, in the temporary folder.
     fn empty_folder(test_name: &str) -> PathBuf {

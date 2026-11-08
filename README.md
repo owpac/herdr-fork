@@ -51,10 +51,13 @@ An orchestrator agent can fork its conversation into the herdr workspace of a gi
 ```sh
 fork="$(herdr plugin list --plugin herdr-fork --json | jq -r '.result.plugins[0].plugin_root')/bin/herdr-fork"
 "$fork" worktree --path <worktree> --agent <name or pane> [--name <agent name>] [--model <model>] [--prompt "<task>"]
-"$fork" worktree --path <worktree> --brief --name <agent name> [--kind claude|codex] [--model <model>] [--prompt "<task>"]
+"$fork" worktree --path <worktree> --brief --name <agent name> [--agent <orchestrator>] [--kind claude|codex] [--model <model>] [--prompt "<task>"]
 ```
 
-A new agent uses the default model of Claude Code or Codex, also for a fork: not the model of the agent that it forks. Give `--model` to choose it, for example `--model haiku` for a small task.
+- **Fork** (`--agent`, without `--brief`): the new agent gets the conversation of `--agent`. Use it for a task that needs the discussion: a hard task, a design, a plan.
+- **Brief** (`--brief`): a new agent without conversation. Give the context in the task, for example in a Beads task that the prompt names. With `--agent`, the new agent takes the kind and the model of this orchestrator.
+
+The settings `agentic_mode` and `agentic_model` (see [Configuration](#configuration)) give the mode and the model. `--model` comes before `agentic_model`.
 
 The command:
 
@@ -63,9 +66,33 @@ The command:
 3. Starts the fork of the conversation of `--agent` (as the actions), or a new agent with `--brief`. A Claude Code agent gets `--allowedTools 'Bash(herdr agent prompt:*)' 'Bash(herdr agent wait:*)'`: it can send its report to the orchestrator without a question.
 4. Sends `--prompt`, if given.
 
-It prints a JSON object: `{"agent", "title", "pane_id", "workspace_id"}`. Without `--name`, a fork gets the names of the actions (`[F<n>] <title>`, `f<n>-<title>`). An agent name follows the rule of herdr: `[a-z][a-z0-9_-]`, 32 characters or less.
+It prints a JSON object: `{"agent", "title", "pane_id", "workspace_id", "mode", "model", "model_source"}`. `model` is `null` for the default model of the agent. `model_source` is `option`, `setting`, `inherited` or `default`. Without `--name`, a fork gets the names of the actions (`[F<n>] <title>`, `f<n>-<title>`). An agent name follows the rule of herdr: `[a-z][a-z0-9_-]`, 32 characters or less.
 
 If the agent waits for an answer before the prompt (for example the trust of a folder of a new repository), the command fails with the pane and the command to send the task later.
+
+## Configuration
+
+`config.toml` in the config folder of the plugin (`herdr plugin config-dir herdr-fork`):
+
+```toml
+# The model of a fork of the actions right, down and tab (default: "inherited").
+manual_model = "inherited"   # "inherited" | "default" | a model, for example "sonnet"
+
+# The model of an agent of the command worktree (default: "auto").
+agentic_model = "auto"       # "auto" | "inherited" | "default" | a model
+
+# Fork or brief for the command worktree (default: "auto").
+agentic_mode = "auto"        # "auto" | "fork" | "brief"
+```
+
+| Model value | Model of the new agent |
+|---|---|
+| `inherited` | The model of the last answer of the forked agent (or of the orchestrator of a brief, with `--agent`). The plugin reads it in the session file. If it cannot, the agent uses its default model. |
+| `auto` | The model that the orchestrator gives with `--model`. Without `--model`: as `inherited`. For the actions, no orchestrator chooses: as `inherited`. |
+| `default` | The default model of Claude Code or Codex. |
+| a model | Always this model. |
+
+With `agentic_mode = "fork"` or `"brief"`, the command refuses the other mode, with the reason. With `"auto"`, the orchestrator chooses.
 
 ## Life of a fork
 
