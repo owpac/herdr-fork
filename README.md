@@ -50,9 +50,11 @@ An orchestrator agent can fork its conversation into the herdr workspace of a gi
 
 ```sh
 fork="$(herdr plugin list --plugin herdr-fork --json | jq -r '.result.plugins[0].plugin_root')/bin/herdr-fork"
-"$fork" worktree --path <worktree> --agent <name or pane> [--name <agent name>] [--prompt "<task>"]
-"$fork" worktree --path <worktree> --brief --name <agent name> [--kind claude|codex] [--prompt "<task>"]
+"$fork" worktree --path <worktree> --agent <name or pane> [--name <agent name>] [--model <model>] [--prompt "<task>"]
+"$fork" worktree --path <worktree> --brief --name <agent name> [--kind claude|codex] [--model <model>] [--prompt "<task>"]
 ```
+
+A new agent uses the default model of Claude Code or Codex, also for a fork: not the model of the agent that it forks. Give `--model` to choose it, for example `--model haiku` for a small task.
 
 The command:
 
