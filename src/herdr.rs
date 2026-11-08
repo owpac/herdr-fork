@@ -6,7 +6,7 @@
 
 use std::env;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -287,6 +287,83 @@ pub fn start_agent(
 /// Close a pane.
 pub fn close_pane(pane_id: &str) -> Result<(), Error> {
     run(&["pane", "close", pane_id])?;
+    Ok(())
+}
+
+/// The herdr workspace of a worktree.
+#[derive(Debug)]
+pub struct WorktreeWorkspace {
+    pub workspace_id: String,
+    pub root_pane_id: String,
+    /// The workspace was open before the call.
+    pub is_already_open: bool,
+}
+
+/// Open the herdr workspace of `worktree`, in the group of the workspace
+/// of `main_checkout`, without the focus. If the workspace is open, herdr
+/// gives it.
+pub fn open_worktree(main_checkout: &Path, worktree: &Path) -> Result<WorktreeWorkspace, Error> {
+    let main_text = main_checkout.to_string_lossy();
+    let worktree_text = worktree.to_string_lossy();
+    let result = run(&[
+        "worktree",
+        "open",
+        "--cwd",
+        &main_text,
+        "--path",
+        &worktree_text,
+        "--no-focus",
+    ])?;
+    Ok(WorktreeWorkspace {
+        workspace_id: string_field(&result, "/workspace/workspace_id")?,
+        root_pane_id: string_field(&result, "/root_pane/pane_id")?,
+        is_already_open: result["already_open"].as_bool().unwrap_or(false),
+    })
+}
+
+/// A pane of a workspace.
+#[derive(Debug, PartialEq, Eq)]
+pub struct WorkspacePane {
+    pub pane_id: String,
+    pub has_agent: bool,
+}
+
+/// Return the panes of a workspace.
+pub fn workspace_panes(workspace_id: &str) -> Result<Vec<WorkspacePane>, Error> {
+    let result = run(&["pane", "list", "--workspace", workspace_id])?;
+    let panes = result["panes"].as_array().cloned().unwrap_or_default();
+    Ok(panes
+        .iter()
+        .filter_map(|pane| {
+            Some(WorkspacePane {
+                pane_id: pane["pane_id"].as_str()?.to_owned(),
+                has_agent: pane["agent"].as_str().is_some(),
+            })
+        })
+        .collect())
+}
+
+/// Open a new tab in a workspace, in `folder`, without the focus. Return
+/// the pane of the tab.
+pub fn open_tab(workspace_id: &str, folder: &Path, label: &str) -> Result<String, Error> {
+    let folder_text = folder.to_string_lossy();
+    let result = run(&[
+        "tab",
+        "create",
+        "--workspace",
+        workspace_id,
+        "--cwd",
+        &folder_text,
+        "--label",
+        label,
+        "--no-focus",
+    ])?;
+    string_field(&result, "/root_pane/pane_id")
+}
+
+/// Send `prompt` to the agent `name`, without a wait for its answer.
+pub fn prompt_agent(name: &str, prompt: &str) -> Result<(), Error> {
+    run(&["agent", "prompt", name, prompt])?;
     Ok(())
 }
 

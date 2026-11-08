@@ -44,6 +44,27 @@ Start Codex with `codex --no-daemon` in a herdr pane. For example, add this line
 
 The plugin starts each Codex fork with `--no-daemon`, so a fork can fork again. Without the daemon, `codex agents` does not show the sessions of herdr, and a session stops when its pane closes.
 
+## Fork into a worktree
+
+An orchestrator agent can fork its conversation into the herdr workspace of a git worktree, or start a new agent there. herdr installs each version of the plugin in a new folder: find the binary with `herdr plugin list`.
+
+```sh
+fork="$(herdr plugin list --plugin herdr-fork --json | jq -r '.result.plugins[0].plugin_root')/bin/herdr-fork"
+"$fork" worktree --path <worktree> --agent <name or pane> [--name <agent name>] [--prompt "<task>"]
+"$fork" worktree --path <worktree> --brief --name <agent name> [--kind claude|codex] [--prompt "<task>"]
+```
+
+The command:
+
+1. Opens the workspace of the worktree, in the group of the workspace of its project, without the focus. If the workspace is open (for example by a `post-start` hook of wt), the command uses it.
+2. Takes the shell of the workspace if it is its only pane, without agent. Else it opens a new tab.
+3. Starts the fork of the conversation of `--agent` (as the actions), or a new agent with `--brief`. A Claude Code agent gets `--allowedTools 'Bash(herdr agent prompt:*)' 'Bash(herdr agent wait:*)'`: it can send its report to the orchestrator without a question.
+4. Sends `--prompt`, if given.
+
+It prints a JSON object: `{"agent", "title", "pane_id", "workspace_id"}`. Without `--name`, a fork gets the names of the actions (`[F<n>] <title>`, `f<n>-<title>`). An agent name follows the rule of herdr: `[a-z][a-z0-9_-]`, 32 characters or less.
+
+If the agent waits for an answer before the prompt (for example the trust of a folder of a new repository), the command fails with the pane and the command to send the task later.
+
 ## Life of a fork
 
 A fork is an independent conversation. The plugin keeps no link and no state between the fork and the original conversation.

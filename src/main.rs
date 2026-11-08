@@ -1,6 +1,6 @@
 //! herdr-fork: fork the Claude Code or Codex session of the focused pane.
 //!
-//! Usage: `herdr-fork right|down|tab [--pane <pane_id>]`
+//! Usage: `herdr-fork right|down|tab [--pane <pane_id>]`, or `herdr-fork worktree ...`
 //!
 //! herdr runs this command for the actions of the plugin. The focused
 //! pane comes from `HERDR_PLUGIN_CONTEXT_JSON`. Give `--pane` to fork
@@ -8,11 +8,16 @@
 //!
 //! `herdr-fork message` is the command of the popup `message`: it shows
 //! the message of `HERDR_FORK_MESSAGE`.
+//!
+//! `herdr-fork worktree --path <worktree> --agent <name|pane> ...` forks
+//! an agent into the herdr workspace of a git worktree (see `worktree`).
+//! It prints a JSON object, and shows no popup: an agent calls it.
 
 mod conversation;
 mod fork;
 mod herdr;
 mod ui;
+mod worktree;
 
 use std::env;
 use std::process::ExitCode;
@@ -90,12 +95,43 @@ fn fork(arguments: &Arguments) -> Result<String, Error> {
     Ok(names.title)
 }
 
+/// The command `worktree`: print the new agent as JSON, or the error on
+/// stderr. No popup: an agent calls this command, not a key of herdr.
+fn fork_into_worktree(command_line: &[String]) -> ExitCode {
+    let arguments = match worktree::parse_arguments(command_line) {
+        Ok(arguments) => arguments,
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::from(2);
+        }
+    };
+    match worktree::run(&arguments) {
+        Ok(started) => {
+            let json = serde_json::json!({
+                "agent": started.agent_name,
+                "title": started.title,
+                "pane_id": started.pane_id,
+                "workspace_id": started.workspace_id,
+            });
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("herdr-fork: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let command_line: Vec<String> = env::args().skip(1).collect();
     if command_line == ["message"] {
         let message = env::var(herdr::MESSAGE_VARIABLE).unwrap_or_default();
         ui::show_message(MESSAGE_TITLE, &message);
         return ExitCode::SUCCESS;
+    }
+    if command_line.first().map(String::as_str) == Some("worktree") {
+        return fork_into_worktree(&command_line[1..]);
     }
     let arguments = match parse_arguments(&command_line) {
         Ok(arguments) => arguments,
