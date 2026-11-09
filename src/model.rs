@@ -138,14 +138,14 @@ mod tests {
     #[test]
     fn the_option_comes_first() {
         let (model, source) = resolve_model(
-            Some("haiku"),
+            Some("sonnet"),
             &ModelSetting::Named("sonnet".to_owned()),
             never,
         );
 
         assert_eq!(
             (model.as_deref(), source),
-            (Some("haiku"), ModelSource::Option)
+            (Some("sonnet"), ModelSource::Option)
         );
     }
 
@@ -163,11 +163,11 @@ mod tests {
     fn inherited_and_auto_read_the_forked_session() {
         for setting in [ModelSetting::Inherited, ModelSetting::Auto] {
             let (model, source) =
-                resolve_model(None, &setting, || Some("claude-haiku-5-5".to_owned()));
+                resolve_model(None, &setting, || Some("claude-sonnet-5-5".to_owned()));
 
             assert_eq!(
                 (model.as_deref(), source),
-                (Some("claude-haiku-5-5"), ModelSource::Inherited)
+                (Some("claude-sonnet-5-5"), ModelSource::Inherited)
             );
         }
     }

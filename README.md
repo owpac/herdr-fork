@@ -63,8 +63,10 @@ The command:
 
 1. Opens the workspace of the worktree, in the group of the workspace of its project, without the focus. If the workspace is open (for example by a `post-start` hook of wt), the command uses it.
 2. Takes the shell of the workspace if it is its only pane, without agent. Else it opens a new tab.
-3. Starts the fork of the conversation of `--agent` (as the actions), or a new agent with `--brief`. A Claude Code agent gets `--allowedTools 'Bash(herdr agent prompt:*)' 'Bash(herdr agent wait:*)'`: it can send its report to the orchestrator without a question.
+3. Starts the fork of the conversation of `--agent` (as the actions), or a new agent with `--brief`.
 4. Sends `--prompt`, if given.
+
+The command sends no report to the orchestrator. The agent writes its result in a Beads task, and the orchestrator reads it there. herdr shows the user when the agent is done.
 
 It prints a JSON object: `{"agent", "title", "pane_id", "workspace_id", "mode", "model", "model_source"}`. `model` is `null` for the default model of the agent. `model_source` is `option`, `setting`, `inherited` or `default`. Without `--name`, a fork gets the names of the actions (`[F<n>] <title>`, `f<n>-<title>`). An agent name follows the rule of herdr: `[a-z][a-z0-9_-]`, 32 characters or less.
 

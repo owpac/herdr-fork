@@ -19,14 +19,6 @@ pub const USAGE: &str = "usage: herdr-fork worktree --path <worktree> \
     (--agent <name|pane> | --brief [--kind claude|codex]) \
     [--name <agent name>] [--model <model>] [--prompt <task>]";
 
-/// The allowed tools of a Claude Code fork: it sends its report to the
-/// orchestrator, and waits for it, without a question.
-const CLAUDE_REPORT_TOOLS: [&str; 3] = [
-    "--allowedTools",
-    "Bash(herdr agent prompt:*)",
-    "Bash(herdr agent wait:*)",
-];
-
 /// The command line of `worktree`.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct WorktreeArguments {
@@ -151,19 +143,10 @@ fn brief_arguments(kind: AgentKind, title: &str) -> Vec<String> {
     }
 }
 
-/// Add the model, then the allowed tools of the report (Claude Code
-/// only), to the arguments of an agent. The allowed tools come last:
-/// `--allowedTools` takes all the next arguments.
-fn with_model_and_report_tools(
-    kind: AgentKind,
-    model: Option<&str>,
-    mut arguments: Vec<String>,
-) -> Vec<String> {
+/// Add the model to the arguments of an agent.
+fn with_model(model: Option<&str>, mut arguments: Vec<String>) -> Vec<String> {
     if let Some(model) = model {
         arguments.extend(["--model".to_owned(), model.to_owned()]);
-    }
-    if kind == AgentKind::Claude {
-        arguments.extend(CLAUDE_REPORT_TOOLS.iter().map(|text| (*text).to_owned()));
     }
     arguments
 }
@@ -267,7 +250,7 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
     };
     let (model, model_source) =
         model::resolve_model(arguments.model.as_deref(), &config.agentic_model, inherited);
-    let agent_arguments = with_model_and_report_tools(kind, model.as_deref(), agent_arguments);
+    let agent_arguments = with_model(model.as_deref(), agent_arguments);
     let workspace = herdr::open_worktree(&main, &worktree)?;
     let panes = if workspace.is_already_open {
         herdr::workspace_panes(&workspace.workspace_id)?
@@ -428,50 +411,24 @@ mod tests {
     }
 
     #[test]
-    fn a_claude_agent_gets_the_model_then_the_tools_of_the_report_last() {
-        let arguments = with_model_and_report_tools(
-            AgentKind::Claude,
-            Some("haiku"),
-            brief_arguments(AgentKind::Claude, "t"),
-        );
-
+    fn the_model_comes_after_the_arguments_of_the_agent() {
         assert_eq!(
-            arguments,
-            strings(&[
-                "--name",
-                "t",
-                "--model",
-                "haiku",
-                "--allowedTools",
-                "Bash(herdr agent prompt:*)",
-                "Bash(herdr agent wait:*)"
-            ])
-        );
-    }
-
-    #[test]
-    fn a_codex_agent_gets_only_the_model() {
-        assert_eq!(
-            with_model_and_report_tools(
-                AgentKind::Codex,
-                Some("gpt-5.5"),
-                brief_arguments(AgentKind::Codex, "t")
-            ),
-            strings(&["--no-daemon", "--model", "gpt-5.5"])
+            with_model(Some("sonnet"), brief_arguments(AgentKind::Claude, "t")),
+            strings(&["--name", "t", "--model", "sonnet"])
         );
         assert_eq!(
-            with_model_and_report_tools(AgentKind::Codex, None, Vec::new()),
-            Vec::<String>::new()
+            with_model(None, brief_arguments(AgentKind::Codex, "t")),
+            strings(&["--no-daemon"])
         );
     }
 
     #[test]
     fn parse_reads_the_model_and_refuses_an_option() {
         let parsed = parse_arguments(&strings(&[
-            "--path", "/w", "--agent", "a", "--model", "haiku",
+            "--path", "/w", "--agent", "a", "--model", "sonnet",
         ]))
         .unwrap();
-        assert_eq!(parsed.model.as_deref(), Some("haiku"));
+        assert_eq!(parsed.model.as_deref(), Some("sonnet"));
         assert!(parse_arguments(&strings(&[
             "--path", "/w", "--agent", "a", "--model", "--x"
         ]))

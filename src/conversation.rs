@@ -165,14 +165,14 @@ mod tests {
             "\n",
             r#"{"type":"assistant","message":{"model":"claude-opus-5-5"}}"#,
             "\n",
-            r#"{"type":"assistant","message":{"model":"claude-haiku-5-5"}}"#,
+            r#"{"type":"assistant","message":{"model":"claude-sonnet-5-5"}}"#,
             "\n",
             r#"{"type":"assistant","message":{"model":"<synthetic>"}}"#,
             "\n",
             "not json\n",
         );
 
-        assert_eq!(last_claude_model(text).as_deref(), Some("claude-haiku-5-5"));
+        assert_eq!(last_claude_model(text).as_deref(), Some("claude-sonnet-5-5"));
     }
 
     #[test]
