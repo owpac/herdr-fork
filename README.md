@@ -50,8 +50,8 @@ An orchestrator agent can fork its conversation into the herdr workspace of a gi
 
 ```sh
 fork="$(herdr plugin list --plugin herdr-fork --json | jq -r '.result.plugins[0].plugin_root')/bin/herdr-fork"
-"$fork" worktree --path <worktree> --agent <name or pane> [--name <agent name>] [--model <model>] [--prompt "<task>"]
-"$fork" worktree --path <worktree> --brief --name <agent name> [--agent <orchestrator>] [--kind claude|codex] [--model <model>] [--prompt "<task>"]
+"$fork" worktree --path <worktree> --agent <name or pane> [--name <agent name>] [--title "<title>"] [--model <model>] [--prompt "<task>"]
+"$fork" worktree --path <worktree> --brief --name <agent name> [--title "<title>"] [--agent <orchestrator>] [--kind claude|codex] [--model <model>] [--prompt "<task>"]
 ```
 
 - **Fork** (`--agent`, without `--brief`): the new agent gets the conversation of `--agent`. Use it for a task that needs the discussion: a hard task, a design, a plan.
@@ -66,7 +66,7 @@ The command:
 3. Starts the fork of the conversation of `--agent` (as the actions), or a new agent with `--brief`.
 4. Sends `--prompt`, if given. If the prompt fails, the error gives the pane of the agent, which runs: send the task again with `herdr agent prompt`.
 
-`--path` can be a subfolder of the worktree. A `--name` that a live agent has stops the command before it opens a tab. If the agent does not start, the command closes the tab that it opened.
+`--title` gives the label of the tab of the agent (default: `--name`, or the title of a fork). The session name of a Claude Code agent stays `--name`, or the title of the fork. If the command takes the shell of the workspace, it also renames the tab of this shell. `--path` can be a subfolder of the worktree. A `--name` that a live agent has stops the command before it opens a tab. If the agent does not start, the command closes the tab that it opened.
 
 The command sends no report to the orchestrator. The agent writes its result in a Beads task, and the orchestrator reads it there. herdr shows the user when the agent is done.
 
