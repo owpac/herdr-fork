@@ -2,6 +2,8 @@
 //!
 //! This module does not call herdr, so the tests can check each rule.
 
+use crate::fork::AgentKind;
+
 use std::fmt;
 
 /// The setting of a model in the config of the plugin.
@@ -112,13 +114,22 @@ impl fmt::Display for ModelSource {
 pub fn resolve_model(
     option: Option<&str>,
     setting: &ModelSetting,
+    kind: AgentKind,
     inherited: impl FnOnce() -> Option<String>,
 ) -> (Option<String>, ModelSource) {
     if let Some(model) = option {
         return (Some(model.to_owned()), ModelSource::Option);
     }
     match setting {
-        ModelSetting::Named(model) => (Some(model.clone()), ModelSource::Setting),
+        ModelSetting::Named(model) if fits_kind(model, kind) => {
+            (Some(model.clone()), ModelSource::Setting)
+        }
+        // A model of the other kind of agent (sonnet for Codex): the
+        // setting acts as inherited.
+        ModelSetting::Named(_) => match inherited() {
+            Some(model) if is_valid_model(&model) => (Some(model), ModelSource::Inherited),
+            _ => (None, ModelSource::Default),
+        },
         ModelSetting::Default => (None, ModelSource::Default),
         ModelSetting::Inherited | ModelSetting::Auto => match inherited() {
             Some(model) if is_valid_model(&model) => (Some(model), ModelSource::Inherited),
@@ -127,9 +138,45 @@ pub fn resolve_model(
     }
 }
 
+/// Return false if the name of `model` belongs to the other kind of
+/// agent: a Claude alias or ID for Codex, a GPT or Codex model for Claude.
+/// An unknown name fits both kinds.
+fn fits_kind(model: &str, kind: AgentKind) -> bool {
+    let name = model.to_ascii_lowercase();
+    let is_claude = name.starts_with("claude")
+        || ["sonnet", "opus", "haiku", "fable", "best", "opusplan"]
+            .iter()
+            .any(|alias| name == *alias || name.starts_with(&format!("{alias}[")));
+    let is_codex = name.starts_with("gpt") || name.contains("codex");
+    match kind {
+        AgentKind::Claude => !is_codex,
+        AgentKind::Codex => !is_claude,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_named_model_of_the_other_kind_acts_as_inherited() {
+        let setting = ModelSetting::Named("sonnet".to_owned());
+
+        assert_eq!(
+            resolve_model(None, &setting, AgentKind::Codex, || Some(
+                "gpt-6.1".to_owned()
+            )),
+            (Some("gpt-6.1".to_owned()), ModelSource::Inherited)
+        );
+        assert_eq!(
+            resolve_model(None, &setting, AgentKind::Claude, never),
+            (Some("sonnet".to_owned()), ModelSource::Setting)
+        );
+        assert!(fits_kind("opus[1m]", AgentKind::Claude));
+        assert!(!fits_kind("opus[1m]", AgentKind::Codex));
+        assert!(!fits_kind("gpt-6.1-codex", AgentKind::Claude));
+        assert!(fits_kind("my-gateway-model", AgentKind::Codex));
+    }
 
     fn never() -> Option<String> {
         panic!("the session must not be read");
@@ -140,6 +187,7 @@ mod tests {
         let (model, source) = resolve_model(
             Some("sonnet"),
             &ModelSetting::Named("sonnet".to_owned()),
+            AgentKind::Claude,
             never,
         );
 
@@ -151,7 +199,12 @@ mod tests {
 
     #[test]
     fn a_named_setting_gives_its_model() {
-        let (model, source) = resolve_model(None, &ModelSetting::Named("sonnet".to_owned()), never);
+        let (model, source) = resolve_model(
+            None,
+            &ModelSetting::Named("sonnet".to_owned()),
+            AgentKind::Claude,
+            never,
+        );
 
         assert_eq!(
             (model.as_deref(), source),
@@ -162,8 +215,9 @@ mod tests {
     #[test]
     fn inherited_and_auto_read_the_forked_session() {
         for setting in [ModelSetting::Inherited, ModelSetting::Auto] {
-            let (model, source) =
-                resolve_model(None, &setting, || Some("claude-sonnet-5-5".to_owned()));
+            let (model, source) = resolve_model(None, &setting, AgentKind::Claude, || {
+                Some("claude-sonnet-5-5".to_owned())
+            });
 
             assert_eq!(
                 (model.as_deref(), source),
@@ -175,15 +229,17 @@ mod tests {
     #[test]
     fn an_unknown_or_invalid_inherited_model_gives_the_default() {
         assert_eq!(
-            resolve_model(None, &ModelSetting::Inherited, || None),
+            resolve_model(None, &ModelSetting::Inherited, AgentKind::Claude, || None),
             (None, ModelSource::Default)
         );
         assert_eq!(
-            resolve_model(None, &ModelSetting::Inherited, || Some("--x".to_owned())),
+            resolve_model(None, &ModelSetting::Inherited, AgentKind::Claude, || Some(
+                "--x".to_owned()
+            )),
             (None, ModelSource::Default)
         );
         assert_eq!(
-            resolve_model(None, &ModelSetting::Default, never),
+            resolve_model(None, &ModelSetting::Default, AgentKind::Claude, never),
             (None, ModelSource::Default)
         );
     }

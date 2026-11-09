@@ -136,10 +136,14 @@ pub fn choose_pane(
 }
 
 /// The arguments of a new agent of `--brief`.
+///
+/// herdr types the command in the shell, so the alias of the README
+/// (`codex='codex --no-daemon'`) applies. Codex refuses a second
+/// `--no-daemon`: a Codex brief gets no argument.
 fn brief_arguments(kind: AgentKind, title: &str) -> Vec<String> {
     match kind {
         AgentKind::Claude => vec!["--name".to_owned(), title.to_owned()],
-        AgentKind::Codex => vec!["--no-daemon".to_owned()],
+        AgentKind::Codex => Vec::new(),
     }
 }
 
@@ -151,26 +155,37 @@ fn with_model(model: Option<&str>, mut arguments: Vec<String>) -> Vec<String> {
     arguments
 }
 
-/// The main checkout of the repository of `worktree`: the parent of the
-/// common git folder.
-fn main_checkout(worktree: &Path) -> Result<PathBuf, Error> {
+/// The root of the checkout of `folder`, and the main checkout of its
+/// repository (the parent of the common git folder). `folder` can be a
+/// subfolder of the checkout.
+fn checkout_roots(folder: &Path) -> Result<(PathBuf, PathBuf), Error> {
     let output = Command::new("git")
         .arg("-C")
-        .arg(worktree)
-        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .arg(folder)
+        .args([
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-common-dir",
+        ])
         .output()
         .map_err(|error| Error::Command(format!("cannot run git: {error}")))?;
     if !output.status.success() {
         return Err(Error::Command(format!(
             "{} is not in a git repository",
-            worktree.display()
+            folder.display()
         )));
     }
-    let common_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    common_dir
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut lines = text.lines().map(str::trim);
+    let (Some(top), Some(common_dir)) = (lines.next(), lines.next()) else {
+        return Err(Error::Command("git gave no checkout".to_owned()));
+    };
+    let main = Path::new(common_dir)
         .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| Error::Command("git gave no main checkout".to_owned()))
+        .ok_or_else(|| Error::Command("git gave no main checkout".to_owned()))?;
+    Ok((PathBuf::from(top), main))
 }
 
 /// The result of the command, for the agent that calls it.
@@ -194,9 +209,9 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
     if let Some(message) = config.agentic_mode.refusal(arguments.is_brief) {
         return Err(Error::Command(message));
     }
-    let worktree = fs::canonicalize(&arguments.path)
+    let folder = fs::canonicalize(&arguments.path)
         .map_err(|error| Error::Command(format!("{}: {error}", arguments.path.display())))?;
-    let main = main_checkout(&worktree)?;
+    let (worktree, main) = checkout_roots(&folder)?;
     if main == worktree {
         return Err(Error::Command(format!(
             "{} is the main checkout, not a linked worktree",
@@ -240,6 +255,16 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
             (kind, names, new_arguments)
         }
     };
+    if let Some(name) = &arguments.name {
+        if herdr::live_agents()?
+            .iter()
+            .any(|agent| agent.name.as_deref() == Some(name.as_str()))
+        {
+            return Err(Error::Command(format!(
+                "A live agent already has the name {name}: give another --name."
+            )));
+        }
+    }
     // Only an agent of the same kind gives its model: a Claude model means
     // nothing to Codex.
     let inherited = || {
@@ -248,8 +273,12 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
             .filter(|source| source.kind == kind)
             .and_then(|source| conversation::last_model(source.kind, &source.session_id))
     };
-    let (model, model_source) =
-        model::resolve_model(arguments.model.as_deref(), &config.agentic_model, inherited);
+    let (model, model_source) = model::resolve_model(
+        arguments.model.as_deref(),
+        &config.agentic_model,
+        kind,
+        inherited,
+    );
     let agent_arguments = with_model(model.as_deref(), agent_arguments);
     let workspace = herdr::open_worktree(&main, &worktree)?;
     let panes = if workspace.is_already_open {
@@ -262,16 +291,23 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
         PaneChoice::Use(pane_id) => pane_id.clone(),
         PaneChoice::NewTab => herdr::open_tab(&workspace.workspace_id, &worktree, &names.title)?,
     };
-    let started = herdr::start_agent(&names.agent_name, kind, &pane_id, &agent_arguments);
-    match started {
+    let mut is_own_tab = matches!(choice, PaneChoice::NewTab);
+    let mut started = herdr::start_agent(&names.agent_name, kind, &pane_id, &agent_arguments);
+    if let Err(Error::Herdr { code, .. }) = &started {
         // The shell of the workspace runs a command: take a new tab.
-        Err(Error::Herdr { code, .. })
-            if code == "agent_pane_busy" && matches!(choice, PaneChoice::Use(_)) =>
-        {
+        if code == "agent_pane_busy" && !is_own_tab {
             pane_id = herdr::open_tab(&workspace.workspace_id, &worktree, &names.title)?;
-            herdr::start_agent(&names.agent_name, kind, &pane_id, &agent_arguments)?;
+            is_own_tab = true;
+            started = herdr::start_agent(&names.agent_name, kind, &pane_id, &agent_arguments);
         }
-        other => other?,
+    }
+    if let Err(error) = started {
+        // Do not leave an empty tab that this command opened. A failed
+        // close must not hide the first error.
+        if is_own_tab && !matches!(&error, Error::Herdr { code, .. } if code == "agent_not_ready") {
+            let _ = herdr::close_pane(&pane_id);
+        }
+        return Err(error);
     }
     if let Some(prompt) = &arguments.prompt {
         herdr::prompt_agent(&names.agent_name, prompt).map_err(|error| match error {
@@ -281,7 +317,12 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
                  herdr agent prompt {} \"<task>\"",
                 names.agent_name, names.agent_name
             )),
-            other => other,
+            // The agent runs: do not start a second one.
+            other => Error::Command(format!(
+                "The agent {} runs in the pane {pane_id}, but its prompt failed: {other}. \
+                 Send the task with: herdr agent prompt {} \"<task>\"",
+                names.agent_name, names.agent_name
+            )),
         })?;
     }
     Ok(Started {
@@ -411,6 +452,61 @@ mod tests {
     }
 
     #[test]
+    fn a_subfolder_of_a_worktree_gives_the_worktree_and_the_main_checkout() {
+        let base = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("herdr-fork-roots-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let main = base.join("repo");
+        let linked = base.join("repo.feature");
+        fs::create_dir_all(&main).unwrap();
+        let git = |folder: &Path, arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(folder)
+                .args(arguments)
+                .output()
+                .unwrap()
+                .status;
+            assert!(status.success(), "git {arguments:?}");
+        };
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(
+            &main,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "c",
+            ],
+        );
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                linked.to_str().unwrap(),
+            ],
+        );
+        fs::create_dir_all(linked.join("src")).unwrap();
+
+        assert_eq!(
+            checkout_roots(&linked.join("src")).unwrap(),
+            (linked.clone(), main.clone())
+        );
+        assert_eq!(checkout_roots(&main).unwrap(), (main.clone(), main));
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
     fn the_model_comes_after_the_arguments_of_the_agent() {
         assert_eq!(
             with_model(Some("sonnet"), brief_arguments(AgentKind::Claude, "t")),
@@ -418,7 +514,7 @@ mod tests {
         );
         assert_eq!(
             with_model(None, brief_arguments(AgentKind::Codex, "t")),
-            strings(&["--no-daemon"])
+            Vec::<String>::new()
         );
     }
 

@@ -136,12 +136,21 @@ fn find_codex_rollout(folder: &Path, session_id: &str, depth: usize) -> Option<P
 /// The model of the last answer in a conversation file of Claude Code.
 /// The function reads the lines from the end, and stops at the first
 /// model.
+///
+/// `requestedModel` is the model that the session asked for, with its
+/// suffix: `claude-opus-5-5[1m]` keeps the context of 1 million tokens.
+/// `message.model` (without the suffix) is the value of older entries.
 fn last_claude_model(text: &str) -> Option<String> {
     text.lines()
         .rev()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|entry| entry["type"] == "assistant")
-        .filter_map(|entry| entry["message"]["model"].as_str().map(str::to_owned))
+        .filter_map(|entry| {
+            entry["requestedModel"]
+                .as_str()
+                .or_else(|| entry["message"]["model"].as_str())
+                .map(str::to_owned)
+        })
         .find(|model| model != "<synthetic>")
 }
 
@@ -159,6 +168,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_requested_model_keeps_its_suffix() {
+        let text = [
+            r#"{"type":"assistant","message":{"model":"claude-opus-5-5"},"requestedModel":"claude-opus-5-5[1m]"}"#,
+        ]
+        .join("\n");
+
+        assert_eq!(
+            last_claude_model(&text).as_deref(),
+            Some("claude-opus-5-5[1m]")
+        );
+    }
+
+    #[test]
     fn the_last_claude_model_skips_the_synthetic_answers() {
         let text = concat!(
             r#"{"type":"user","message":{"content":"hi"}}"#,
@@ -172,7 +194,10 @@ mod tests {
             "not json\n",
         );
 
-        assert_eq!(last_claude_model(text).as_deref(), Some("claude-sonnet-5-5"));
+        assert_eq!(
+            last_claude_model(text).as_deref(),
+            Some("claude-sonnet-5-5")
+        );
     }
 
     #[test]

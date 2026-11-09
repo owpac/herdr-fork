@@ -84,7 +84,7 @@ fn fork(arguments: &Arguments) -> Result<String, Error> {
     let mut fork_arguments = source.kind.fork_arguments(&source.session_id, &names.title);
     // The setting manual_model. No orchestrator chooses: auto acts as
     // inherited.
-    let (model, _) = model::resolve_model(None, &config::load().manual_model, || {
+    let (model, _) = model::resolve_model(None, &config::load().manual_model, source.kind, || {
         conversation::last_model(source.kind, &source.session_id)
     });
     if let Some(model) = model {
