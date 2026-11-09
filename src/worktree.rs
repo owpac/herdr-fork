@@ -17,7 +17,10 @@ use crate::model::{self, ModelSource};
 
 pub const USAGE: &str = "usage: herdr-fork worktree --path <worktree> \
     (--agent <name|pane> | --brief [--kind claude|codex]) \
-    [--name <agent name>] [--model <model>] [--prompt <task>]";
+    [--name <agent name>] [--title <title>] [--model <model>] [--prompt <task>]";
+
+/// The longest title of a tab: the limit of herdr for a label.
+const MAX_TITLE_CHARACTERS: usize = 80;
 
 /// The command line of `worktree`.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -31,6 +34,9 @@ pub struct WorktreeArguments {
     pub kind: Option<AgentKind>,
     /// The herdr name of the new agent.
     pub name: Option<String>,
+    /// The label of the tab of the new agent. Default: the session name of
+    /// the agent (the name, or the title of a fork).
+    pub title: Option<String>,
     /// The model of the new agent. Without it, the agent uses its default
     /// model, not the model of the agent that it forks.
     pub model: Option<String>,
@@ -53,6 +59,16 @@ pub fn parse_arguments(arguments: &[String]) -> Result<WorktreeArguments, String
             "--path" => path = Some(PathBuf::from(value)),
             "--agent" => parsed.agent = Some(value),
             "--name" => parsed.name = Some(value),
+            "--title" => {
+                // The title becomes an argument of herdr: refuse a value
+                // that herdr can read as an option.
+                if !is_valid_title(&value) {
+                    return Err(format!(
+                        "invalid title {value:?}: one line of {MAX_TITLE_CHARACTERS} characters or less, not starting with -"
+                    ));
+                }
+                parsed.title = Some(value);
+            }
             "--prompt" => parsed.prompt = Some(value),
             "--model" => {
                 // The model becomes an argument of the agent: refuse a value
@@ -88,6 +104,16 @@ pub fn parse_arguments(arguments: &[String]) -> Result<WorktreeArguments, String
         }
     }
     Ok(parsed)
+}
+
+/// Tell if `title` can be the label of a tab: one line, not empty, not too
+/// long, not an option.
+fn is_valid_title(title: &str) -> bool {
+    let trimmed = title.trim();
+    !trimmed.is_empty()
+        && !trimmed.starts_with('-')
+        && !title.contains(['\n', '\r'])
+        && title.chars().count() <= MAX_TITLE_CHARACTERS
 }
 
 /// Tell if herdr accepts `name` as an agent name: `[a-z][a-z0-9_-]{0,31}`.
@@ -287,16 +313,19 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
         Vec::new()
     };
     let choice = choose_pane(workspace.is_already_open, &workspace.root_pane_id, &panes);
+    // The session name stays the name of the agent: it is unique, and the
+    // title of the tab can change with the task.
+    let tab_label = arguments.title.as_ref().unwrap_or(&names.title);
     let mut pane_id = match &choice {
         PaneChoice::Use(pane_id) => pane_id.clone(),
-        PaneChoice::NewTab => herdr::open_tab(&workspace.workspace_id, &worktree, &names.title)?,
+        PaneChoice::NewTab => herdr::open_tab(&workspace.workspace_id, &worktree, tab_label)?,
     };
     let mut is_own_tab = matches!(choice, PaneChoice::NewTab);
     let mut started = herdr::start_agent(&names.agent_name, kind, &pane_id, &agent_arguments);
     if let Err(Error::Herdr { code, .. }) = &started {
         // The shell of the workspace runs a command: take a new tab.
         if code == "agent_pane_busy" && !is_own_tab {
-            pane_id = herdr::open_tab(&workspace.workspace_id, &worktree, &names.title)?;
+            pane_id = herdr::open_tab(&workspace.workspace_id, &worktree, tab_label)?;
             is_own_tab = true;
             started = herdr::start_agent(&names.agent_name, kind, &pane_id, &agent_arguments);
         }
@@ -308,6 +337,12 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
             let _ = herdr::close_pane(&pane_id);
         }
         return Err(error);
+    }
+    // A tab that this command opened has the title as its label. The shell
+    // of the workspace keeps the label of its tab ("1"): give it the title.
+    // A failed rename does not stop the agent.
+    if !is_own_tab {
+        let _ = herdr::rename_tab_of_pane(&pane_id, tab_label);
     }
     if let Some(prompt) = &arguments.prompt {
         herdr::prompt_agent(&names.agent_name, prompt).map_err(|error| match error {
@@ -504,6 +539,31 @@ mod tests {
         );
         assert_eq!(checkout_roots(&main).unwrap(), (main.clone(), main));
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn parse_reads_a_title_and_refuses_a_bad_one() {
+        let parsed = parse_arguments(&strings(&[
+            "--path",
+            "/w",
+            "--brief",
+            "--name",
+            "task-8t2",
+            "--title",
+            "palindrome checker",
+        ]))
+        .unwrap();
+        assert_eq!(parsed.title.as_deref(), Some("palindrome checker"));
+
+        for title in ["", "  ", "--resume", "two\nlines", &"x".repeat(81)] {
+            assert!(
+                parse_arguments(&strings(&[
+                    "--path", "/w", "--brief", "--name", "a", "--title", title
+                ]))
+                .is_err(),
+                "{title:?}"
+            );
+        }
     }
 
     #[test]

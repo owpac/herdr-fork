@@ -361,6 +361,14 @@ pub fn open_tab(workspace_id: &str, folder: &Path, label: &str) -> Result<String
     string_field(&result, "/root_pane/pane_id")
 }
 
+/// Give the label `label` to the tab of the pane `pane_id`.
+pub fn rename_tab_of_pane(pane_id: &str, label: &str) -> Result<(), Error> {
+    let pane = run(&["pane", "get", pane_id])?;
+    let tab_id = string_field(&pane, "/pane/tab_id")?;
+    run(&["tab", "rename", &tab_id, label])?;
+    Ok(())
+}
+
 /// Send `prompt` to the agent `name`, without a wait for its answer.
 pub fn prompt_agent(name: &str, prompt: &str) -> Result<(), Error> {
     run(&["agent", "prompt", name, prompt])?;
