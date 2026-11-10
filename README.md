@@ -57,7 +57,7 @@ fork="$(herdr plugin list --plugin herdr-fork --json | jq -r '.result.plugins[0]
 - **Fork** (`--agent`, without `--brief`): the new agent gets the conversation of `--agent`. Use it for a task that needs the discussion: a hard task, a design, a plan.
 - **Brief** (`--brief`): a new agent without conversation. Give the context in the task, for example in a Beads task that the prompt names. With `--agent`, the new agent takes the kind and the model of this orchestrator.
 
-The settings `agentic_mode` and `agentic_model` (see [Configuration](#configuration)) give the mode and the model. `--model` comes before `agentic_model`.
+The settings `agentic_mode` and `agentic_model` (see [Configuration](#configuration)) give the mode and the model. `--model` comes before `agentic_model`. A `--model` of the other kind of agent (for example `sonnet` for a Codex brief) acts as `inherited`: Codex cannot start with a model of Claude.
 
 The command:
 

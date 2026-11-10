@@ -110,15 +110,28 @@ impl fmt::Display for ModelSource {
 ///
 /// `--model` comes first, then the setting. `inherited` (and `auto`
 /// without `--model`) reads the model of the forked agent: if the plugin
-/// cannot read it, the agent uses its default model.
+/// cannot read it, the agent uses its default model. A model of the other
+/// kind of agent (`--model sonnet` for Codex) acts as inherited: the agent
+/// cannot start with it.
 pub fn resolve_model(
     option: Option<&str>,
     setting: &ModelSetting,
     kind: AgentKind,
     inherited: impl FnOnce() -> Option<String>,
 ) -> (Option<String>, ModelSource) {
-    if let Some(model) = option {
-        return (Some(model.to_owned()), ModelSource::Option);
+    match option {
+        Some(model) if fits_kind(model, kind) => {
+            return (Some(model.to_owned()), ModelSource::Option);
+        }
+        Some(_) => {
+            return match inherited() {
+                Some(model) if is_valid_model(&model) && fits_kind(&model, kind) => {
+                    (Some(model), ModelSource::Inherited)
+                }
+                _ => (None, ModelSource::Default),
+            };
+        }
+        None => {}
     }
     match setting {
         ModelSetting::Named(model) if fits_kind(model, kind) => {
@@ -180,6 +193,28 @@ mod tests {
 
     fn never() -> Option<String> {
         panic!("the session must not be read");
+    }
+
+    #[test]
+    fn an_option_of_the_other_kind_acts_as_inherited() {
+        let setting = ModelSetting::Auto;
+
+        assert_eq!(
+            resolve_model(Some("sonnet"), &setting, AgentKind::Codex, || Some(
+                "gpt-6.1".to_owned()
+            )),
+            (Some("gpt-6.1".to_owned()), ModelSource::Inherited)
+        );
+        assert_eq!(
+            resolve_model(Some("sonnet"), &setting, AgentKind::Codex, || None),
+            (None, ModelSource::Default)
+        );
+        assert_eq!(
+            resolve_model(Some("gpt-6.1-codex"), &setting, AgentKind::Claude, || Some(
+                "opus".to_owned()
+            )),
+            (Some("opus".to_owned()), ModelSource::Inherited)
+        );
     }
 
     #[test]
