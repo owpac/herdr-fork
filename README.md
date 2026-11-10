@@ -42,7 +42,7 @@ Start Codex with `codex --no-daemon` in a herdr pane. For example, add this line
 [[ -n "$HERDR_ENV" ]] && alias codex='codex --no-daemon'
 ```
 
-The plugin starts each Codex fork with `codex fork --no-daemon`, so a fork can fork again. A Codex brief (`worktree --brief`) gets no argument: the alias adds `--no-daemon`, and Codex refuses it twice. Without the daemon, `codex agents` does not show the sessions of herdr, and a session stops when its pane closes.
+The plugin starts each Codex fork with `codex fork --no-daemon`, so a fork can fork again. A Codex brief (`worktree --brief`) gets no `--no-daemon`, only `--model` if a model applies: the alias adds `--no-daemon`, and Codex refuses it twice. Without the daemon, `codex agents` does not show the sessions of herdr, and a session stops when its pane closes.
 
 ## Fork into a worktree
 
@@ -57,7 +57,7 @@ fork="$(herdr plugin list --plugin herdr-fork --json | jq -r '.result.plugins[0]
 - **Fork** (`--agent`, without `--brief`): the new agent gets the conversation of `--agent`. Use it for a task that needs the discussion: a hard task, a design, a plan.
 - **Brief** (`--brief`): a new agent without conversation. Give the context in the task, for example in a Beads task that the prompt names. With `--agent`, the new agent takes the kind and the model of this orchestrator.
 
-The settings `agentic_mode` and `agentic_model` (see [Configuration](#configuration)) give the mode and the model. `--model` comes before `agentic_model`.
+The settings `agentic_mode` and `agentic_model` (see [Configuration](#configuration)) give the mode and the model. `--model` comes before `agentic_model`. A `--model` of the other kind of agent (for example `sonnet` for a Codex brief) acts as `inherited`: Codex cannot start with a model of Claude.
 
 The command:
 
@@ -68,7 +68,7 @@ The command:
 
 `--title` gives the label of the tab of the agent (default: `--name`, or the title of a fork). The session name of a Claude Code agent stays `--name`, or the title of the fork. If the command takes the shell of the workspace, it also renames the tab of this shell. `--path` can be a subfolder of the worktree. A `--name` that a live agent has stops the command before it opens a tab. If the agent does not start, the command closes the tab that it opened.
 
-The command sends no report to the orchestrator. The agent writes its result in a Beads task, and the orchestrator reads it there. herdr shows the user when the agent is done.
+The command sends no report to the orchestrator. At the end, the agent follows the skill `report` of owpac/prompts: it writes its result in the Beads task, then sends a message to the orchestrator. herdr shows the user when the agent is done.
 
 It prints a JSON object: `{"agent", "title", "pane_id", "workspace_id", "mode", "model", "model_source"}`. `model` is `null` for the default model of the agent. `model_source` is `option`, `setting`, `inherited` or `default`. Without `--name`, a fork gets the names of the actions (`[F<n>] <title>`, `f<n>-<title>`). An agent name follows the rule of herdr: `[a-z][a-z0-9_-]`, 32 characters or less.
 
@@ -105,6 +105,7 @@ An agent runs the command from its pane, without `HERDR_PLUGIN_CONFIG_DIR`: the 
 A fork is an independent conversation. The plugin keeps no link and no state between the fork and the original conversation.
 
 - To close a fork, close its pane. The conversation stays on the disk: `claude --resume "[F1] Parser fix"` opens it again.
+- In a worktree, the observer of the plugin herdr-worktrunk closes an idle fork after the merge of its pull request, then removes the worktree. Its notification gives the command that resumes the fork.
 - After a restart of herdr, the herdr integration resumes the fork with its own session ID.
 - The agent deletes its old conversations itself (for Claude Code: the setting `cleanupPeriodDays`).
 
