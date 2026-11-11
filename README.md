@@ -124,7 +124,7 @@ herdr plugin install owpac/herdr-fork --ref 2026.11.1
 
 The install downloads the release binary for your machine, and checks it with the `SHA256SUMS` file of the release. If the release has no binary for your machine, the install builds the binary with cargo (Rust 1.88 or later).
 
-Without `--ref`, herdr installs the last commit of `main`. Its version is `0.0.0`, so the install always builds with cargo.
+Without `--ref`, herdr installs the last commit of `main`. If this commit is not a release commit, the install builds with cargo.
 
 To update, install the tag of the new release. `herdr plugin update` fetches the same tag again.
 
@@ -177,13 +177,16 @@ shellcheck scripts/*.sh
 
 Each push on `main` makes a release, like the tools [pac](https://github.com/owpac/pac), kompose and craft of owpac. The version is `YYYY.M.N`: the month of the push in UTC, and the number of the release in this month (for example `2026.11.1`). The month has no leading zero, because Cargo and herdr read the version as SemVer.
 
-On `main`, `herdr-plugin.toml` and `Cargo.toml` keep the version `0.0.0`. For each push, the workflow `release`:
+For each push, the workflow `release`:
 
 1. Writes the version in `herdr-plugin.toml`, `Cargo.toml` and `Cargo.lock`, in a release commit on top of the commit of `main`.
-2. Pushes the tag of the version, on this release commit. `main` does not change.
+2. Pushes the tag of the version, on this release commit.
 3. Builds the binaries for Linux and macOS (`x86_64` and `aarch64`), and publishes them with `SHA256SUMS` in the GitHub release of the tag.
+4. Pushes the release commit to `main`, as a fast-forward. Thus `main` and the marketplace of herdr.dev show the version of the last release.
 
-Install a tag, not a commit of `main`: `herdr plugin install owpac/herdr-fork --ref 2026.11.1`. On `main`, the version `0.0.0` has no release, so `scripts/install.sh` builds with cargo.
+The ruleset of `main` needs a pull request and the checks. The workflow pushes the release commit with a deploy key, in the secret `RELEASE_DEPLOY_KEY`: the ruleset has the deploy keys in its bypass list. The subject of the release commit ends with `[skip ci]`, so this push starts no workflow. If another merge moves `main` before this push, git refuses the push, and the release of this other merge writes its version.
+
+Install a tag, not a commit of `main`: `herdr plugin install owpac/herdr-fork --ref 2026.11.1`. A commit of `main` after the last release has no release binary, so `scripts/install.sh` builds with cargo.
 
 The build and release method comes from [herdr-bar](https://github.com/jeffarese/herdr-bar) (MIT).
 

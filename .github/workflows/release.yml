@@ -2,10 +2,13 @@
 # YYYY.M.N, the month of the push in UTC and the number of the release in this month.
 #
 # herdr reads the version in herdr-plugin.toml, and scripts/install.sh downloads the release of
-# this version. On main, the version stays 0.0.0. For each release, the job publish writes the
-# version in herdr-plugin.toml, Cargo.toml and Cargo.lock, in a release commit on top of the
-# main commit. The tag points to this release commit, and main does not change. The dotfiles
-# install a tag: `herdr plugin install owpac/herdr-fork --ref <tag>`.
+# this version. The marketplace of herdr.dev shows the version of herdr-plugin.toml on main. For
+# each release, the job publish writes the version in herdr-plugin.toml, Cargo.toml and
+# Cargo.lock, in a release commit on top of the main commit. The tag points to this release
+# commit. After the upload of the binaries, the job pushes the release commit to main with the
+# deploy key of the secret RELEASE_DEPLOY_KEY: the ruleset of main has the deploy keys in its
+# bypass list. The subject of the release commit ends with [skip ci], so this push starts no
+# workflow. The dotfiles install a tag: `herdr plugin install owpac/herdr-fork --ref <tag>`.
 #
 # The month has no leading zero (2027.3.1, not 2027.03.1): Cargo and herdr read the version as
 # SemVer, and SemVer refuses a leading zero.
@@ -53,6 +56,15 @@ jobs:
         id: version
         run: |
           main_commit=$(git rev-parse HEAD)
+          # A push of a release commit has nothing to release. Its subject ends with [skip ci],
+          # so its push to main starts no workflow: this check is a guard.
+          tag=$(git tag --points-at HEAD --list '[0-9][0-9][0-9][0-9].*.*' | head -n 1)
+          if [ -n "$tag" ]; then
+            echo "The commit $main_commit is the release commit of $tag."
+            echo "version=$tag" >> "$GITHUB_OUTPUT"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # A re-run of the same push: reuse the tag of its release commit.
           for existing in $(git tag --list '[0-9][0-9][0-9][0-9].*.*'); do
             if [ "$(git rev-parse "$existing^{commit}^")" = "$main_commit" ]; then
@@ -162,7 +174,7 @@ jobs:
           mv Cargo.lock.new Cargo.lock
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --quiet -am "chore: release $VERSION"
+          git commit --quiet -am "chore: release $VERSION [skip ci]"
           git tag "$VERSION"
           git push origin "refs/tags/$VERSION"
           echo "Tagged $VERSION"
@@ -198,3 +210,31 @@ jobs:
           fi
           gh release upload "$TAG" dist/* --clobber
           gh release edit "$TAG" --draft=false
+      # main gets the version of its last release, after the upload of the binaries. The push is
+      # a fast-forward only. If another merge moved main after this push, git refuses the push:
+      # the release of this other merge writes its version in main. GITHUB_TOKEN cannot push to
+      # main: the ruleset of a personal repository refuses GitHub Actions in its bypass list.
+      - name: Push the release commit to main
+        env:
+          TAG: ${{ needs.version.outputs.version }}
+          DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::warning::The secret RELEASE_DEPLOY_KEY is missing: main keeps its version."
+            exit 0
+          fi
+          key="$RUNNER_TEMP/deploy_key"
+          known_hosts="$RUNNER_TEMP/known_hosts"
+          (umask 077 && printf '%s\n' "$DEPLOY_KEY" > "$key")
+          # The host keys of github.com, from the API of GitHub (HTTPS).
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts"
+          release_commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+          if git push "git@github.com:$REPOSITORY.git" "$release_commit:refs/heads/main"; then
+            echo "main is at the release commit of $TAG."
+          else
+            echo "::warning::git refused the push of the release commit to main: main keeps its version."
+          fi
+          rm -f "$key"
