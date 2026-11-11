@@ -124,7 +124,7 @@ herdr plugin install owpac/herdr-fork --ref 2026.11.1
 
 The install downloads the release binary for your machine, and checks it with the `SHA256SUMS` file of the release. If the release has no binary for your machine, the install builds the binary with cargo (Rust 1.88 or later).
 
-Without `--ref`, herdr installs the last commit of `main`. Its version is `0.0.0`, so the install always builds with cargo.
+Without `--ref`, herdr installs the last commit of `main`. If this commit is not a release commit, the install builds with cargo.
 
 To update, install the tag of the new release. `herdr plugin update` fetches the same tag again.
 
@@ -175,15 +175,21 @@ shellcheck scripts/*.sh
 
 ## Release
 
-Each push on `main` makes a release, like the tools [pac](https://github.com/owpac/pac), kompose and craft of owpac. The version is `YYYY.M.N`: the month of the push in UTC, and the number of the release in this month (for example `2026.11.1`). The month has no leading zero, because Cargo and herdr read the version as SemVer.
+A release comes from the pull request "chore: release YYYY.M.N", like the releases of [mise](https://github.com/jdx/mise). The version is `YYYY.M.N`: the month in UTC, and the number of the release in this month (for example `2026.11.1`). The month has no leading zero, because Cargo and herdr read the version as SemVer.
 
-On `main`, `herdr-plugin.toml` and `Cargo.toml` keep the version `0.0.0`. For each push, the workflow `release`:
+1. After each push on `main`, and each day, the workflow `release-pr` runs `scripts/release-pr.sh`. If `main` has commits after the last release, the script writes the next version in `herdr-plugin.toml`, `Cargo.toml` and `Cargo.lock`. [git-cliff](https://git-cliff.org) writes the section of this version in `CHANGELOG.md`, from the conventional commits (`cliff.toml`).
+2. The script pushes the branch `release`, and opens or updates its pull request.
+3. Merge this pull request to release, or let the workflow `release-merge` merge it each day at 19:00 UTC. `release-merge` merges only if all the checks pass. To stop the releases, convert the pull request to a draft. `main` gets the version: the marketplace of herdr.dev shows it.
+4. The workflow `release` sees a version without a tag. It builds the binaries for Linux and macOS (`x86_64` and `aarch64`), and pushes the tag on this commit of `main`. Then it publishes the binaries with `SHA256SUMS` in the GitHub release of the tag, with the section of `CHANGELOG.md` as notes.
 
-1. Writes the version in `herdr-plugin.toml`, `Cargo.toml` and `Cargo.lock`, in a release commit on top of the commit of `main`.
-2. Pushes the tag of the version, on this release commit. `main` does not change.
-3. Builds the binaries for Linux and macOS (`x86_64` and `aarch64`), and publishes them with `SHA256SUMS` in the GitHub release of the tag.
+Install a tag, not a commit of `main`: `herdr plugin install owpac/herdr-fork --ref 2026.11.1`. A commit of `main` after the last release has no release binary, so `scripts/install.sh` builds with cargo.
 
-Install a tag, not a commit of `main`: `herdr plugin install owpac/herdr-fork --ref 2026.11.1`. On `main`, the version `0.0.0` has no release, so `scripts/install.sh` builds with cargo.
+The workflows `release-pr` and `release-merge` use the token of a GitHub App. A push, a pull request or a merge of `GITHUB_TOKEN` starts no workflow: the checks of the pull request and the workflow `release` do not start. The repository needs:
+
+- the variable `RELEASE_APP_CLIENT_ID`: the client ID of the App,
+- the secret `RELEASE_APP_PRIVATE_KEY`: a private key of the App.
+
+The App has the permissions Contents and Pull requests (read and write), and an installation on the repository.
 
 The build and release method comes from [herdr-bar](https://github.com/jeffarese/herdr-bar) (MIT).
 
