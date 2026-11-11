@@ -11,8 +11,9 @@
 # The version is YYYY.M.N: the month in UTC, and the number of the release in this month. The
 # month has no leading zero: Cargo and herdr read the version as SemVer.
 #
-# GitHub holds the workflows of a pull request of GITHUB_TOKEN until a maintainer approves them.
-# Thus the script approves the runs of the branch release: the ruleset of main needs their checks.
+# The script pushes and opens the pull request with the token of a GitHub App (GH_TOKEN, and the
+# credentials of the checkout). GitHub starts the checks of this pull request, like for a person.
+# The commit has the name of the App: APP_SLUG gives its slug.
 #
 #   RELEASE_PR_DRY_RUN=1   print the version and the changelog, and change nothing
 set -eu
@@ -78,8 +79,11 @@ git cliff "$@" --tag "$version" --unreleased --prepend CHANGELOG.md
 awk 'previous != "" && /^## / { print "" } { print; previous = $0 }' CHANGELOG.md > CHANGELOG.md.new
 mv CHANGELOG.md.new CHANGELOG.md
 
-git config user.name "github-actions[bot]"
-git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+# The noreply address with the ID of the bot user: GitHub shows the avatar of the App.
+bot="${APP_SLUG:?the workflow gives the slug of the GitHub App}[bot]"
+bot_id=$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq .id)
+git config user.name "$bot"
+git config user.email "$bot_id+$bot@users.noreply.github.com"
 git checkout --quiet -B release
 git add herdr-plugin.toml Cargo.toml Cargo.lock CHANGELOG.md
 git commit --quiet -m "chore: release $version"
@@ -87,7 +91,10 @@ git commit --quiet -m "chore: release $version"
 git push --quiet --force origin release
 
 title="chore: release $version"
-body=$(printf 'Merge this pull request to release %s. The workflow release-pr updates it after each push to main, and each day.\n\n%s\n' "$version" "$notes")
+body=$(printf '%s\n%s\n\n%s\n' \
+  "Merge this pull request to release $version. The workflow release-pr updates it after each push to main, and each day." \
+  "The workflow release-merge merges it each day at 19:00 UTC, if all the checks pass. To stop the release, convert it to a draft." \
+  "$notes")
 pr=$(gh pr list --head release --base main --state open --json number --jq '.[0].number // empty')
 if [ -z "$pr" ]; then
   gh pr create --base main --head release --title "$title" --body "$body"
@@ -95,21 +102,4 @@ else
   gh pr edit "$pr" --title "$title" --body "$body"
 fi
 
-# GitHub creates the runs a few seconds after the push: wait for the 2 workflows of a pull
-# request (ci and release), for 2 minutes at most.
-head=$(git rev-parse HEAD)
-runs=""
-attempt=0
-while [ "$attempt" -lt 24 ]; do
-  runs=$(gh run list --branch release --commit "$head" --event pull_request --json databaseId,conclusion \
-    --jq '.[] | select(.conclusion == "action_required") | .databaseId')
-  [ "$(printf '%s\n' "$runs" | grep -c .)" -ge 2 ] && break
-  attempt=$((attempt + 1))
-  sleep 5
-done
-for run in $runs; do
-  gh api --method POST "repos/{owner}/{repo}/actions/runs/$run/approve" >/dev/null
-  say "approved the run $run"
-done
-[ -n "$runs" ] || say "WARNING: no run waits for an approval: approve the checks of the pull request"
 say "the pull request releases $version"

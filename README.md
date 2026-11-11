@@ -178,13 +178,18 @@ shellcheck scripts/*.sh
 A release comes from the pull request "chore: release YYYY.M.N", like the releases of [mise](https://github.com/jdx/mise). The version is `YYYY.M.N`: the month in UTC, and the number of the release in this month (for example `2026.11.1`). The month has no leading zero, because Cargo and herdr read the version as SemVer.
 
 1. After each push on `main`, and each day, the workflow `release-pr` runs `scripts/release-pr.sh`. If `main` has commits after the last release, the script writes the next version in `herdr-plugin.toml`, `Cargo.toml` and `Cargo.lock`. [git-cliff](https://git-cliff.org) writes the section of this version in `CHANGELOG.md`, from the conventional commits (`cliff.toml`).
-2. The script pushes the branch `release`, and opens or updates its pull request. GitHub holds the workflows of a pull request of `GITHUB_TOKEN` until a maintainer approves them, so the script approves the runs of the branch `release`.
-3. Merge this pull request to release. `main` gets the version: the marketplace of herdr.dev shows it.
+2. The script pushes the branch `release`, and opens or updates its pull request.
+3. Merge this pull request to release, or let the workflow `release-merge` merge it each day at 19:00 UTC. `release-merge` merges only if all the checks pass. To stop the releases, convert the pull request to a draft. `main` gets the version: the marketplace of herdr.dev shows it.
 4. The workflow `release` sees a version without a tag. It builds the binaries for Linux and macOS (`x86_64` and `aarch64`), and pushes the tag on this commit of `main`. Then it publishes the binaries with `SHA256SUMS` in the GitHub release of the tag, with the section of `CHANGELOG.md` as notes.
 
 Install a tag, not a commit of `main`: `herdr plugin install owpac/herdr-fork --ref 2026.11.1`. A commit of `main` after the last release has no release binary, so `scripts/install.sh` builds with cargo.
 
-The setting "Allow GitHub Actions to create and approve pull requests" of the repository must be on: the workflow `release-pr` opens the pull request with `GITHUB_TOKEN`.
+The workflows `release-pr` and `release-merge` use the token of a GitHub App. A push, a pull request or a merge of `GITHUB_TOKEN` starts no workflow: the checks of the pull request and the workflow `release` do not start. The repository needs:
+
+- the variable `RELEASE_APP_CLIENT_ID`: the client ID of the App,
+- the secret `RELEASE_APP_PRIVATE_KEY`: a private key of the App.
+
+The App has the permissions Contents and Pull requests (read and write), and an installation on the repository.
 
 The build and release method comes from [herdr-bar](https://github.com/jeffarese/herdr-bar) (MIT).
 
