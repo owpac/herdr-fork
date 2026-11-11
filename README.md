@@ -191,7 +191,7 @@ The workflows `release-pr` and `release-merge` use the token of a GitHub App. A 
 
 The App has the permissions Contents and Pull requests (read and write), and an installation on the repository.
 
-The build and release method comes from [herdr-bar](https://github.com/jeffarese/herdr-bar) (MIT).
+The build method comes from [herdr-bar](https://github.com/jeffarese/herdr-bar) (MIT). The release pull request comes from [mise](https://github.com/jdx/mise) (MIT).
 
 ## License
 
