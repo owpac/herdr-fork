@@ -8,9 +8,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # scripts/release-pr.sh starts this workflow on the branch release: a pull request of
-  # GITHUB_TOKEN starts no workflow, and the ruleset of main needs these checks.
-  workflow_dispatch:
 
 permissions:
   contents: read

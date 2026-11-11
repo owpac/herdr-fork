@@ -11,8 +11,8 @@
 # The version is YYYY.M.N: the month in UTC, and the number of the release in this month. The
 # month has no leading zero: Cargo and herdr read the version as SemVer.
 #
-# A pull request of GITHUB_TOKEN starts no workflow. Thus the script starts the workflow ci on
-# the branch release itself: the ruleset of main needs its checks.
+# GitHub holds the workflows of a pull request of GITHUB_TOKEN until a maintainer approves them.
+# Thus the script approves the runs of the branch release: the ruleset of main needs their checks.
 #
 #   RELEASE_PR_DRY_RUN=1   print the version and the changelog, and change nothing
 set -eu
@@ -94,5 +94,22 @@ if [ -z "$pr" ]; then
 else
   gh pr edit "$pr" --title "$title" --body "$body"
 fi
-gh workflow run ci.yml --ref release
+
+# GitHub creates the runs a few seconds after the push: wait for the 2 workflows of a pull
+# request (ci and release), for 2 minutes at most.
+head=$(git rev-parse HEAD)
+runs=""
+attempt=0
+while [ "$attempt" -lt 24 ]; do
+  runs=$(gh run list --branch release --commit "$head" --event pull_request --json databaseId,conclusion \
+    --jq '.[] | select(.conclusion == "action_required") | .databaseId')
+  [ "$(printf '%s\n' "$runs" | grep -c .)" -ge 2 ] && break
+  attempt=$((attempt + 1))
+  sleep 5
+done
+for run in $runs; do
+  gh api --method POST "repos/{owner}/{repo}/actions/runs/$run/approve" >/dev/null
+  say "approved the run $run"
+done
+[ -n "$runs" ] || say "WARNING: no run waits for an approval: approve the checks of the pull request"
 say "the pull request releases $version"

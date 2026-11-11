@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      # Push the branch release, open its pull request, and start the workflow ci on it.
+      # Push the branch release, open its pull request, and approve the runs of its checks.
       contents: write
       pull-requests: write
       actions: write
