@@ -264,7 +264,8 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
                 },
                 None => fork::fork_names(&source.title, &source.session_id, &herdr::live_agents()?),
             };
-            let fork_arguments = source.kind.fork_arguments(&source.session_id, &names.title);
+            let session_name = arguments.title.as_ref().unwrap_or(&names.title);
+            let fork_arguments = source.kind.fork_arguments(&source.session_id, session_name);
             (source.kind, names, fork_arguments)
         }
         _ => {
@@ -277,7 +278,8 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
                 title: name.clone(),
                 agent_name: name,
             };
-            let new_arguments = brief_arguments(kind, &names.title);
+            let session_name = arguments.title.as_ref().unwrap_or(&names.title);
+            let new_arguments = brief_arguments(kind, session_name);
             (kind, names, new_arguments)
         }
     };
@@ -313,8 +315,8 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
         Vec::new()
     };
     let choice = choose_pane(workspace.is_already_open, &workspace.root_pane_id, &panes);
-    // The session name stays the name of the agent: it is unique, and the
-    // title of the tab can change with the task.
+    // The session name of Claude Code is the title, if the caller gives one.
+    // The herdr agent name stays `--name`: herdr commands use it.
     let tab_label = arguments.title.as_ref().unwrap_or(&names.title);
     let mut pane_id = match &choice {
         PaneChoice::Use(pane_id) => pane_id.clone(),
@@ -362,7 +364,7 @@ pub fn run(arguments: &WorktreeArguments) -> Result<Started, Error> {
     }
     Ok(Started {
         agent_name: names.agent_name,
-        title: names.title,
+        title: arguments.title.clone().unwrap_or(names.title),
         pane_id,
         workspace_id: workspace.workspace_id,
         mode: if arguments.is_brief { "brief" } else { "fork" },
@@ -576,6 +578,15 @@ mod tests {
             with_model(None, brief_arguments(AgentKind::Codex, "t")),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn a_title_is_the_session_name_of_a_claude_agent() {
+        let arguments = brief_arguments(AgentKind::Claude, "Tri des workspaces");
+        assert_eq!(arguments, strings(&["--name", "Tri des workspaces"]));
+        let fork = AgentKind::Claude.fork_arguments("s1", "Tri des workspaces");
+        assert_eq!(fork[3..], strings(&["--name", "Tri des workspaces"])[..]);
+        assert!(brief_arguments(AgentKind::Codex, "Tri des workspaces").is_empty());
     }
 
     #[test]
