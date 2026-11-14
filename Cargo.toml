@@ -1,7 +1,7 @@
 [package]
 name = "herdr-fork"
 # The version of the last release (YYYY.M.N): the workflow release-pr writes it.
-version = "2026.11.11"
+version = "2026.11.12"
 edition = "2021"
 # The oldest toolchain that the cargo fallback of scripts/install.sh supports.
 rust-version = "1.88"
