@@ -66,7 +66,7 @@ The command:
 3. Starts the fork of the conversation of `--agent` (as the actions), or a new agent with `--brief`.
 4. Sends `--prompt`, if given. If the prompt fails, the error gives the pane of the agent, which runs: send the task again with `herdr agent prompt`.
 
-`--title` gives the label of the tab of the agent (default: `--name`, or the title of a fork). The session name of a Claude Code agent stays `--name`, or the title of the fork. If the command takes the shell of the workspace, it also renames the tab of this shell. `--path` can be a subfolder of the worktree. A `--name` that a live agent has stops the command before it opens a tab. If the agent does not start, the command closes the tab that it opened.
+`--title` gives the label of the tab of the agent (default: `--name`, or the title of a fork). It is also the session name of a Claude Code agent, and can have spaces. Send a message to this agent with this session name. Without `--title`, the session name is `--name`, or the title of the fork. herdr commands always use the agent name (`--name`). A Codex agent has no session name. If the command takes the shell of the workspace, it also renames the tab of this shell. `--path` can be a subfolder of the worktree. A `--name` that a live agent has stops the command before it opens a tab. If the agent does not start, the command closes the tab that it opened.
 
 The command sends no report to the orchestrator. At the end, the agent follows the skill `report` of owpac/prompts: it writes its result in the Beads task, then sends a message to the orchestrator. herdr shows the user when the agent is done.
 
