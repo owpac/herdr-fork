@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "herdr-fork"
-version = "2026.11.11"
+version = "2026.11.12"
 dependencies = [
  "serde",
  "serde_json",
